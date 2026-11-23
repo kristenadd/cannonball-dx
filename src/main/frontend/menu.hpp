@@ -28,6 +28,9 @@
 #include "directx/ffeedback.hpp"
 
 #define Menu MenuLegacy
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 #include "menu_legacy.hpp.inc"
 #undef Menu
 
@@ -1003,9 +1006,16 @@ protected:
             const bool selected = direction == 0 && select_pressed();
             if (direction != 0 || selected)
             {
-                static const int ASPECT_ORDER[5] = { 0, 1, 4, 2, 3 };
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+                // FULL matches the device's screen shape; offered on iOS.
+                static const int ASPECT_ORDER[] = { video_settings_t::ASPECT_FULL, 0, 1, 4, 2, 3 };
+#else
+                static const int ASPECT_ORDER[] = { 0, 1, 4, 2, 3 };
+#endif
+                constexpr int ASPECT_COUNT =
+                    static_cast<int>(sizeof(ASPECT_ORDER) / sizeof(ASPECT_ORDER[0]));
                 int order_index = 0;
-                for (int i = 0; i < 5; ++i)
+                for (int i = 0; i < ASPECT_COUNT; ++i)
                 {
                     if (ASPECT_ORDER[i] == config.video.widescreen)
                     {
@@ -1015,7 +1025,7 @@ protected:
                 }
 
                 const int step = direction < 0 ? -1 : 1;
-                order_index = (order_index + step + 5) % 5;
+                order_index = (order_index + step + ASPECT_COUNT) % ASPECT_COUNT;
                 const int next = ASPECT_ORDER[order_index];
 
                 if (next != config.video.widescreen)

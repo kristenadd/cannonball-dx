@@ -622,7 +622,7 @@ private:
         glBindTexture(GL_TEXTURE_2D, glb::G.texGame);
 
         const bool rgb555 = fmt == glb::State::PixFmt::RGB555;
-        const GLenum internal_format = rgb555 ? GL_RGB5_A1 : GL_RGBA;
+        const GLenum internal_format = rgb555 ? CB_GL_RGB5_A1_INTERNAL : GL_RGBA;
         const GLenum external_format = GL_RGBA;
         const GLenum type = rgb555
             ? GL_UNSIGNED_SHORT_5_5_5_1

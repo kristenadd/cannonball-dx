@@ -4,6 +4,7 @@
 #include "frontend/config.hpp"
 #include "engine/outrun.hpp"
 #include "video.hpp"
+#include "engine/widescreen_layout.hpp"
 
 #include <array>
 #include <cstdint>
@@ -230,7 +231,7 @@ namespace music_side_art
 
     inline void render(uint16_t* buffer)
     {
-        if (!buffer || config.video.widescreen != 2 ||
+        if (!buffer || !widescreen_layout::wider_than_16_9() ||
             (outrun.game_state != GS_INIT_MUSIC && outrun.game_state != GS_MUSIC))
         {
             return;
@@ -269,7 +270,11 @@ namespace music_side_art
 
             for (int dx = 0; dx < span.length; ++dx)
             {
-                const int logical_x = logical_start_x + dx;
+                // Centre the 536-wide canvas on the current width and clip.
+                const int logical_x =
+                    logical_start_x + dx - widescreen_layout::side_art_shift();
+                if (logical_x < 0 || logical_x >= widescreen_layout::native_width())
+                    continue;
 
                 const int physical_x = logical_x * render_scale;
                 const int physical_y = static_cast<int>(span.y) * render_scale;

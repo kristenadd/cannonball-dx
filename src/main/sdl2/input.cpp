@@ -26,6 +26,7 @@
 #define reset_axis_config      reset_axis_config_base
 #define set_rumble             set_rumble_base
 #include "sdl2/input_base.cpp"
+
 #undef scan_joysticks
 #undef add_joystick
 #undef remove_joystick
@@ -42,6 +43,23 @@
 #undef handle_controller_up
 #undef reset_axis_config
 #undef set_rumble
+
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
+// The Exit system action quits the game. iOS apps must not quit themselves
+// (it looks like a crash), so there it opens the frontend menu instead.
+static void request_exit()
+{
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    if (cannonball::state == cannonball::STATE_GAME)
+        cannonball::state = cannonball::STATE_INIT_MENU;
+#else
+    cannonball::state = cannonball::STATE_QUIT;
+#endif
+}
+
 
 namespace
 {
@@ -229,7 +247,7 @@ namespace
                 Config::SYSTEM_ACTION_EXIT, signature, type, index, value,
                 button_pressed, group);
             if (exit_state > 0)
-                cannonball::state = cannonball::STATE_QUIT;
+                request_exit();
         }
 
         // Presses are context-sensitive, but the matching release must always
@@ -1255,7 +1273,7 @@ void Input::handle_key_down(SDL_Keysym* keysym)
     if (cannonball::state == cannonball::STATE_GAME &&
         keysym->sym == config.system_action_key(Config::SYSTEM_ACTION_EXIT))
     {
-        cannonball::state = cannonball::STATE_QUIT;
+        request_exit();
         return;
     }
 

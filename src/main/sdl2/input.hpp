@@ -251,6 +251,11 @@ private:
     void set_device_target(int target, bool is_pressed);
     void set_key_state(int p, bool is_pressed);
     void ensure_gamecontroller_open();
+public:
+    // Extra Menu Access sources outside the configurable bindings
+    // (iOS: controller Select/Create and screen taps).
+    void set_menu_request(bool is_pressed) { set_key_state(MENU, is_pressed); }
+private:
 
     // The current multi-device implementations are retained under these names
     // and wrapped by input.cpp to add optional direct-view/per-device bindings.

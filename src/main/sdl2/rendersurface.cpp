@@ -26,7 +26,7 @@
 #include <new>        // std::align_val_t, ::operator new/delete
 #include <cstddef>    // std::size_t
 #include <cstdint>
-#include <omp.h>
+#include "omp_compat.hpp"
 #include <math.h>
 #include <cmath>   // std::sqrtf, std::fabs, std::roundf, std::lroundf, etc.
 #include "gl_platform.hpp"

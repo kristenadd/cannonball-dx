@@ -1,3 +1,5 @@
+#include "engine/outrun.hpp"
+#include "engine/widescreen_layout.hpp"
 #include <cstring> // memcpy
 #include <algorithm> // std::fill_n, std::clamp
 #include "globals.hpp"
@@ -339,19 +341,28 @@ void hwtiles::render_tile_layer(uint16_t* buf, uint8_t page_index, uint8_t prior
         } // end for mx loop
     } // end for my loop
 
-    // 21:9 only. Apply a small centred overscan to the completed background
-    // so tilemap build-up at the extreme edges stays outside the visible area.
+    // Background overscan. Widths beyond 512 (21:9, or FULL on very wide
+    // displays) magnify the completed background by 536/472, centred, so
+    // tilemap build-up at the extreme edges stays outside the visible area.
+    // The 21:9 music-select side art was drawn against that magnified
+    // background, so any width that shows the side art uses the same
+    // magnification on that screen to keep the art aligned with the tiles.
     // Road foreground, sprites and HUD are rendered later and are unaffected.
-    if (config.video.widescreen == 2 && page_index == 0 && priority_draw == 0 && s16_width_noscale > 512)
+    const bool music_side_art =
+        widescreen_layout::wider_than_16_9() &&
+        (outrun.game_state == GS_INIT_MUSIC || outrun.game_state == GS_MUSIC);
+    if (page_index == 0 && priority_draw == 0 &&
+        (s16_width_noscale > 512 || music_side_art))
     {
         const int scale = config.s16_width / s16_width_noscale;
-        // Keep one additional tile-width of safety around the 21:9
-        // background so page/tile build-up remains outside the visible image.
-        // This affects only the completed background layer, not road/sprites/HUD.
-        const int overscan = 32 * scale;
         const int width = config.s16_width;
         const int height = config.s16_height;
-        const int source_width = width - (overscan << 1);
+        // Fixed magnification of the 21:9 case: (536 - 64) : 536 at this scale.
+        // src_x = centre * (1 - k) + k * dst_x, with k = num / den. At 536 this
+        // is exactly the original 32-pixel overscan formula.
+        const int64_t num = static_cast<int64_t>(S16_WIDTH_ULTRAWIDE - 64) * scale - 1;
+        const int64_t den = static_cast<int64_t>(S16_WIDTH_ULTRAWIDE) * scale - 1;
+        const int64_t offset = static_cast<int64_t>(width - 1) * (den - num);
         uint16_t row_copy[S16_WIDTH_ULTRAWIDE * 4];
 
         for (int row_index = 0; row_index < height; ++row_index)
@@ -361,8 +372,8 @@ void hwtiles::render_tile_layer(uint16_t* buf, uint8_t page_index, uint8_t prior
 
             for (int dst_x = 0; dst_x < width; ++dst_x)
             {
-                const int src_x = overscan +
-                    ((source_width - 1) * dst_x) / (width - 1);
+                const int src_x = static_cast<int>(
+                    (offset + 2 * num * dst_x) / (2 * den));
                 row[dst_x] = row_copy[src_x];
             }
         }

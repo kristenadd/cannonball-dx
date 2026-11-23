@@ -25,6 +25,9 @@
 #include "frontend/ttrial.hpp"
 
 #include <iostream>
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 
 #include "directx/ffeedback.hpp"
 
@@ -152,7 +155,9 @@ void Menu::populate_for_pc()
     menu_main.push_back(ENTRY_GAMEMODES);
     menu_main.push_back(ENTRY_SETTINGS);
     menu_main.push_back(ENTRY_ABOUT);
-    menu_main.push_back(ENTRY_EXIT);
+#if !(defined(__APPLE__) && TARGET_OS_IPHONE)
+    menu_main.push_back(ENTRY_EXIT);   // iOS apps are closed from the app switcher
+#endif
 
     menu_gamemodes.push_back(ENTRY_ENHANCED);
     menu_gamemodes.push_back(ENTRY_ORIGINAL);

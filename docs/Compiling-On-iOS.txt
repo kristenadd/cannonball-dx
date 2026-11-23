@@ -1,0 +1,124 @@
+Compiling CannonBall DX for iOS and iPadOS
+==========================================
+
+Requirements
+------------
+- macOS with Xcode 15 or later (iOS SDK)
+- CMake 3.20+ (brew install cmake)
+- No other dependencies: SDL2 2.32.10 and tinyxml2 11.0.0 are downloaded and
+  built automatically for iOS.
+
+The app supports iOS/iPadOS 15 and later, in landscape only.
+
+1. Generate the Xcode project
+
+    cmake -S . -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+
+   The first configure downloads SDL2, tinyxml2, miniz and the Mesen2 scaler
+   sources and can take a few minutes.
+
+2a. Build for the Simulator
+
+    xcodebuild -project build-ios/cannonball-dx.xcodeproj -target cannonball-dx \
+        -configuration Release -sdk iphonesimulator -arch arm64 build
+
+    Output: build-ios/Release-iphonesimulator/<App Name>.app
+    Install: xcrun simctl install booted "build-ios/Release-iphonesimulator/<App Name>.app"
+
+2b. Build for an iPhone or iPad
+
+   Command line (signs, builds, installs and launches; <UDID> comes from
+   "xcrun devicectl list devices"):
+
+    xcodebuild -project build-ios/cannonball-dx.xcodeproj -target cannonball-dx \
+        -configuration Release -sdk iphoneos -allowProvisioningUpdates build
+    xcrun devicectl device install app --device <UDID> "build-ios/Release-iphoneos/<App Name>.app"
+    xcrun devicectl device process launch --device <UDID> <bundle id>
+
+   Device builds must be signed. Put your team ID in apple-overrides.cmake
+   (see apple-overrides.cmake.example):
+
+    set(APPLE_DEVELOPMENT_TEAM "ABCDE12345")
+
+   Then open build-ios/cannonball-dx.xcodeproj in Xcode, pick the
+   cannonball-dx scheme and your device, and Run. Xcode manages the signing
+   certificate and provisioning profile automatically.
+
+3. Add ROMs
+
+   The app's Documents folder is its ROM folder, and the Files app shows it
+   under On My iPhone (or On My iPad) > <App Name>. Copy outrun.zip there
+   (AirDrop, iCloud Drive, Finder's device sync, or Files), then reopen the
+   app. Without ROMs the app shows a message explaining this and quits.
+
+   Simulator shortcut:
+
+    cp outrun.zip "$(xcrun simctl get_app_container booted <bundle id> data)/Documents/"
+
+   config.xml, high scores and play stats are kept privately in
+   Library/Application Support/CannonBall DX inside the app's container.
+
+Controls
+--------
+- Game controllers (Xbox, PlayStation, MFi) work through SDL, including rumble.
+- A hardware keyboard uses the normal keyboard controls (1 = Start, 5 = Coin,
+  arrows to steer, and so on; see README.md).
+- iOS reserves the Home / PS / Xbox button, which is the default Menu
+  Access button, so on iOS the Select / Create / Share (Back) button also
+  opens the menu. It still inserts a coin too, which doesn't matter in Free
+  Play.
+- Tapping the screen opens the menu.
+- The app always starts on the main menu (menu.enabled is forced on). Other
+  platforms default to starting in attract mode.
+- iOS apps don't quit themselves: the menu has no Exit entry, and the Exit
+  action (Esc by default) opens the menu instead. Close the app from the app
+  switcher.
+- Info.plist must not set GCSupportsControllerUserInteraction. With it set,
+  iOS delivers B / Circle as a UIKit Menu press, which SDL turns into Esc and
+  the game quits.
+- There are no on-screen driving controls yet, so a controller or keyboard is
+  needed to play.
+
+Custom app name and icon
+------------------------
+apple-overrides.cmake sets the name, icon and bundle ID for iOS as well as
+macOS. The icon is converted to a 1024x1024 asset-catalog icon and Xcode
+generates the smaller sizes.
+
+How the port works
+------------------
+- Rendering uses the system OpenGL ES 2.0 framework. Apple has deprecated it
+  but still ships it on iOS. SDL renders through its own framebuffer object
+  on iOS, so the renderer records the framebuffer bound at startup and
+  restores it instead of assuming framebuffer 0.
+- The 16-bit game texture uses the unsized GL_RGBA internal format on iOS,
+  because the iOS driver strictly requires internalformat == format (OpenGL
+  ES 2.0 rules). Other platforms keep GL_RGB5_A1.
+- SDL2main provides main() and runs the game loop on the main thread, as
+  UIKit requires.
+- iOS 27 terminates apps that don't use the UIScene lifecycle, and SDL2
+  predates it. Info.plist declares a scene manifest, and
+  platform/ios/ios_scene.mm supplies the scene delegate and assigns every
+  UIWindow that SDL creates (launch screen, game window, message boxes) to the
+  app's window scene. SDL also never sees rotations in a scene-based app, so
+  on iOS the renderer always treats the screen as landscape.
+- There is no OpenMP runtime on iOS. src/main/omp_compat.hpp supplies
+  fallbacks, and the "#pragma omp" loops run serially. The game still uses
+  its own render threads.
+- MP3 custom music is disabled (mpg123 isn't built for iOS yet). WAV and YM
+  custom music work.
+- The video mode is always full screen. The default aspect is FULL (iOS
+  only): the game width is chosen from the device's screen shape (about
+  340 px on an iPad mini, about 488 px on recent iPhones), so the image fills
+  the screen without stretching. Width-dependent fixes that were tied to the
+  21:9 preset (music-select side art, cloud tiling, sprite wrapping,
+  background magnification) now key off the actual width. The presets give
+  the same results as before. Existing iOS configs switch to FULL once
+  (video.ios_full_default); after that the chosen aspect is kept.
+
+Known limitations
+-----------------
+- No touch controls yet.
+- Rendering is at point resolution (not the full Retina pixel resolution),
+  then scaled up by iOS.
+- visionOS has no OpenGL ES and will need a Metal (or ANGLE) renderer.

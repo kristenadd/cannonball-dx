@@ -13,7 +13,12 @@
 #include <SDL.h>
 #include <string>
 
-#if defined(__APPLE__) && !defined(CANNONBALL_USE_GLES)
+#if defined(__APPLE__)
+    #include <TargetConditionals.h>
+#endif
+
+// macOS uses desktop OpenGL; iOS/tvOS use the system OpenGL ES framework.
+#if defined(__APPLE__) && TARGET_OS_OSX && !defined(CANNONBALL_USE_GLES)
     #define CANNONBALL_DESKTOP_GL 1
     #ifndef GL_SILENCE_DEPRECATION
         #define GL_SILENCE_DEPRECATION 1
@@ -22,7 +27,20 @@
     #include <OpenGL/glext.h>
 #else
     #define CANNONBALL_DESKTOP_GL 0
+    #if defined(__APPLE__) && !defined(GLES_SILENCE_DEPRECATION)
+        #define GLES_SILENCE_DEPRECATION 1
+    #endif
     #include <SDL_opengles2.h>
+#endif
+
+// Internal format for the 16-bit (RGB555 + 1-bit alpha) game texture.
+// OpenGL ES 2.0 requires internalformat == format, and the iOS driver enforces
+// it (a sized GL_RGB5_A1 fails and leaves the screen black). Other drivers
+// accept the sized format, so keep their tested behaviour unchanged.
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    #define CB_GL_RGB5_A1_INTERNAL GL_RGBA
+#else
+    #define CB_GL_RGB5_A1_INTERNAL GL_RGB5_A1
 #endif
 
 namespace glb {

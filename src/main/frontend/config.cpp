@@ -8,6 +8,9 @@
 
 // Pre-include the base file's dependencies before the temporary method-name
 // macros below. This keeps the macros away from standard-library headers.
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 #include <iostream>
 #include <fstream>
 #include <iterator>
@@ -629,7 +632,11 @@ void Config::load()
     // any outdated resource config that may still be present in a build folder.
     if (first_run)
     {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        video.widescreen = video_settings_t::ASPECT_FULL; // fill the device's screen
+#else
         video.widescreen = 0;
+#endif
         video.fps = 2;
         video.shader_mode = 0;
         video.shadow_mask = 0;

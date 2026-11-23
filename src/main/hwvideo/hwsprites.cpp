@@ -564,7 +564,10 @@ void hwsprites::render(uint16_t* pixels, const uint8_t priority)
         // adjust X coordinate
         // note: the threshhold below is a guess. If it is too high, rachero will draw garbage
         // If it is too low, smgp won't draw the bottom part of the road
-        if (config.video.widescreen != 2 && xpos < 0x80 && xdelta < 0)
+        // Wrapping is only safe while the wrapped area is off-screen, i.e. the
+        // left extension is narrower than (0xbe - 0x80) pixels: true for 4:3,
+        // 16:10 and 16:9, false for 21:9 and wide FULL widths.
+        if (config.s16_x_off <= (0xbe - 0x80) && xpos < 0x80 && xdelta < 0)
             xpos += 0x200;
 
         xpos -= 0xbe;

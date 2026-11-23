@@ -18,6 +18,9 @@
 
 // SDL Library
 #include <SDL.h>
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 
 // SDL Specific Code
 #include "sdl2/timer.hpp"
@@ -49,7 +52,7 @@
 #include <mutex>
 #include <chrono>
 #include <semaphore>
-#include <omp.h>
+#include "omp_compat.hpp"
 #include <condition_variable>
 #include <cstdio>
 #include <algorithm>
@@ -251,7 +254,12 @@ static void show_rom_load_error()
         "- A suitable MAME outrun.zip (a current merged set is recommended)\n"
         "- Traditional extracted CannonBall / OutRun Revision B ROM files\n\n"
         "Optional early/Japanese program ROMs and corrected PCM ROM data are also supported when present.\n\n"
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        "Add outrun.zip to this app's folder in the Files app (On My iPhone / On My iPad), then reopen the app. "
+        "See roms.txt there for details. Please use ROM data you legally own.";
+#else
         "See roms/roms.txt for details. Please use ROM data you legally own.";
+#endif
 
     // ROM validation happens before the normal SDL/video startup. Bring up only
     // the minimum SDL subsystems needed for a friendly native error dialog, then
@@ -322,11 +330,32 @@ static void process_events(void)
 
             case SDL_CONTROLLERBUTTONDOWN:
                 input.handle_controller_down(&event.cbutton);
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+                // iOS reserves the Home/PS/Guide button (the default Menu
+                // Access), so Select/Create/Back opens the menu as well.
+                if (event.cbutton.button == SDL_CONTROLLER_BUTTON_BACK)
+                    input.set_menu_request(true);
+#endif
                 break;
 
             case SDL_CONTROLLERBUTTONUP:
                 input.handle_controller_up(&event.cbutton);
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+                if (event.cbutton.button == SDL_CONTROLLER_BUTTON_BACK)
+                    input.set_menu_request(false);
+#endif
                 break;
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+            // No touch controls yet: tapping the screen opens the menu.
+            case SDL_FINGERDOWN:
+                input.set_menu_request(true);
+                break;
+
+            case SDL_FINGERUP:
+                input.set_menu_request(false);
+                break;
+#endif
 
             case SDL_JOYHATMOTION:
                 input.handle_joy_hat(&event.jhat);
@@ -1041,46 +1070,64 @@ static bool parse_command_line(int argc, char* argv[]) {
 
 #ifdef __APPLE__
 #include <filesystem>
-// When launched as a .app bundle the working directory is "/", but CannonBall
-// resolves config.xml, res/ and roms/ relative to it. Run from a per-user data
-// folder instead (~/Library/Application Support/CannonBall DX) and point its
-// res/ at the bundle's read-only resources. ROMs go in that folder's roms/.
-static void macos_prepare_working_directory()
+// CannonBall resolves config.xml, res/ and roms/ relative to the working
+// directory. Apple app bundles start elsewhere ("/" on macOS) and their bundle
+// is read-only, so run from a per-user data folder with res/ linked back into
+// the bundle.
+//
+// macOS (.app only): ~/Library/Application Support/CannonBall DX, ROMs in its roms/.
+// iOS: <container>/Library/Application Support/CannonBall DX, with roms/ linked
+//      to the app's Documents folder so ROMs can be added through the Files app.
+static void apple_prepare_working_directory()
 {
     namespace fs = std::filesystem;
-    char* base = SDL_GetBasePath();   // .../CannonBall DX.app/Contents/Resources/ when bundled
+    std::error_code ec;
+
+    char* base = SDL_GetBasePath();   // bundle resource folder
     if (!base) return;
     const std::string base_path(base);
     SDL_free(base);
+#if TARGET_OS_OSX
     if (base_path.find(".app/Contents/Resources") == std::string::npos)
         return;                       // plain command-line build: keep the caller's cwd
+#endif
+    const fs::path bundle_res = fs::path(base_path) / "res";
+    const fs::path roms_readme = fs::path(base_path) / "roms.txt";
 
     char* pref = SDL_GetPrefPath(nullptr, "CannonBall DX");
     if (!pref) return;
     const fs::path data_dir(pref);
     SDL_free(pref);
 
-    std::error_code ec;
     fs::current_path(data_dir, ec);
     if (ec) {
         std::cerr << "Unable to use data folder " << data_dir << ": " << ec.message() << std::endl;
         return;
     }
 
-    // Refresh the res link every launch so it follows the app if it is moved.
-    const fs::path res_link = data_dir / "res";
-    const fs::path bundle_res = fs::path(base_path) / "res";
-    if (fs::is_symlink(res_link, ec))
-        fs::remove(res_link, ec);
-    if (!fs::exists(res_link, ec))
-        fs::create_directory_symlink(bundle_res, res_link, ec);
+    // Refresh links every launch: the bundle moves when the app is moved
+    // (macOS) or reinstalled (iOS).
+    auto relink = [&](const fs::path& link, const fs::path& target) {
+        if (fs::is_symlink(link, ec))
+            fs::remove(link, ec);
+        if (!fs::exists(link, ec))
+            fs::create_directory_symlink(target, link, ec);
+    };
+    relink(data_dir / "res", bundle_res);
 
+#if TARGET_OS_OSX
     const fs::path roms_dir = data_dir / "roms";
-    if (!fs::exists(roms_dir, ec)) {
+#else
+    const char* home = std::getenv("HOME");
+    const fs::path roms_dir = home ? fs::path(home) / "Documents" : data_dir / "roms";
+    fs::create_directories(roms_dir, ec);
+    relink(data_dir / "roms", roms_dir);
+#endif
+    if (!fs::exists(roms_dir / "roms.txt", ec)) {
         fs::create_directories(roms_dir, ec);
-        fs::copy_file(bundle_res.parent_path() / "roms.txt", roms_dir / "roms.txt", ec);
+        fs::copy_file(roms_readme, roms_dir / "roms.txt", ec);
     }
-    std::cout << "Data folder: " << data_dir.string() << std::endl;
+    std::cout << "Data folder: " << data_dir.string() << "\nROM folder: " << roms_dir.string() << std::endl;
 }
 #endif
 
@@ -1089,7 +1136,11 @@ int main(int argc, char* argv[]) {
     install_segv_handler();
 #endif
 #ifdef __APPLE__
-    macos_prepare_working_directory();
+    apple_prepare_working_directory();
+#endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    // The game image is landscape-only.
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 #endif
 #ifdef _WIN32
     // Keep SDL drawable pixels aligned with the monitor the window is actually

@@ -16,6 +16,9 @@
     - Play stats load/save
 ***************************************************************************/
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 #include <iostream>
 #include <fstream>   // for std::ifstream / std::ofstream
 #include <iterator>  // for std::istreambuf_iterator
@@ -212,7 +215,12 @@ void Config::load()
     if (video.fps != 0 && video.fps != 3)
         video.fps = 2;
     video.fps_count     = cfg.get_int("video.fps_counter",     0); // FPS Counter
-    video.widescreen    = cfg.get_int("video.widescreen",      0); // Aspect: 0=4:3, 1=16:9, 2=21:9, 3=stretched, 4=16:10
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    // iOS defaults to FULL so the game fills the device's screen.
+    video.widescreen    = cfg.get_int("video.widescreen",      video_settings_t::ASPECT_FULL);
+#else
+    video.widescreen    = cfg.get_int("video.widescreen",      0); // Aspect: 0=4:3, 1=16:9, 2=21:9, 3=stretched, 4=16:10, 5=full
+#endif
 
     // Legacy mode 2 used to mean stretched fullscreen. Stretching is now an
     // aspect-ratio choice, leaving display mode free for real exclusive fullscreen.
@@ -227,8 +235,22 @@ void Config::load()
     {
         video.mode = video_settings_t::MODE_FULL;
     }
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    // iOS apps always fill the screen; there are no windows or display modes.
+    video.mode = video_settings_t::MODE_FULL;
+    // Always start on the main menu: on iOS it is the natural entry point,
+    // since there is no Exit and the Home button belongs to the system.
+    menu.enabled = 1;
+#endif
 
-    if (video.widescreen < 0 || video.widescreen > 4)
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    // One-time migration: configs written before FULL existed (or with the
+    // old 4:3 default) switch to FULL once. After that the saved choice wins.
+    if (cfg.get_int("video.ios_full_default", 0) == 0)
+        video.widescreen = video_settings_t::ASPECT_FULL;
+#endif
+
+    if (video.widescreen < 0 || video.widescreen > video_settings_t::ASPECT_FULL)
         video.widescreen = 0;
 
     video.hires_next    =
@@ -458,6 +480,9 @@ bool Config::save()
     cfg.put_int("video.fps",                video.fps);           // Frame Rate: 0=30 FPS, 2=60 FPS, 3=120 FPS
     cfg.put_int("video.fps_counter",        video.fps_count);     // FPS Counter (0)
     cfg.put_int("video.widescreen",         video.widescreen);    // Widescreen Mode (1)
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    cfg.put_int("video.ios_full_default",   1);                   // FULL default migration done
+#endif
     cfg.put_int("video.vsync",              video.vsync);         // V-Sync (1)
     cfg.put_int("video.hires",              video.hires);         // Game engine hires mode (1=enabled)
     cfg.put_int("video.hiresprites",        video.hiresprites);   // hi-res sprites (1=enabled)

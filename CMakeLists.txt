@@ -11,6 +11,14 @@
 
 cmake_minimum_required(VERSION 3.20)
 project(cannonball-dx)
+
+# iOS builds cross-compile with: -G Xcode -DCMAKE_SYSTEM_NAME=iOS
+# (see docs/Compiling-On-iOS.txt).
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(CB_IOS TRUE)
+else()
+    set(CB_IOS FALSE)
+endif()
 include(GNUInstallDirs)
 include(FetchContent)
 
@@ -69,7 +77,12 @@ option(PROFILE_WITH_CALLGRIND  "Reduce inlining for cleaner callgrind graphs" OF
 option(PIXEL_ACCURACY "Enable pixel-accurate sprite rendering" ON)
 
 # --- Option for MP3 playback ---
-option(WITH_MP3 "Enable MP3 playback via mpg123" ON)
+if(CB_IOS)
+    # No mpg123 build for iOS yet; WAV and YM custom music still work.
+    option(WITH_MP3 "Enable MP3 playback via mpg123" OFF)
+else()
+    option(WITH_MP3 "Enable MP3 playback via mpg123" ON)
+endif()
 
 # --- Option to install man page ---
 option(INSTALL_MANPAGE "Install cannonball-dx man page" ON)
@@ -398,6 +411,29 @@ set(_SDL2_TARGETS "")
 set(_SDL2_INCLUDE_DIRS "")
 set(_SDL2_LINK_TARGET "")
 
+if(CB_IOS)
+    # iOS: no system packages, so build pinned SDL2 and tinyxml2 statically.
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "" FORCE)
+    set(SDL_TEST OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        cannonball_sdl2
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG release-2.32.10
+        GIT_SHALLOW TRUE
+    )
+    set(tinyxml2_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        cannonball_tinyxml2
+        GIT_REPOSITORY https://github.com/leethomason/tinyxml2.git
+        GIT_TAG 11.0.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(cannonball_sdl2 cannonball_tinyxml2)
+    # SDL2main supplies main() and runs our (renamed) SDL_main inside UIKit.
+    list(APPEND _SDL2_TARGETS SDL2::SDL2main SDL2::SDL2-static)
+    set(_TINYXML2_TARGET tinyxml2::tinyxml2)
+else()
 find_package(SDL2 QUIET CONFIG)
 if(TARGET SDL2::SDL2)
     list(APPEND _SDL2_TARGETS SDL2::SDL2)
@@ -434,6 +470,7 @@ else()
     pkg_check_modules(TINYXML2 REQUIRED IMPORTED_TARGET tinyxml2)
     set(_TINYXML2_TARGET PkgConfig::TINYXML2)
 endif()
+endif() # CB_IOS
 
 # ——————————————————————————————————————
 # EGL / OpenGLES2 via pkg-config (Linux, Android, etc)
@@ -448,7 +485,11 @@ target_include_directories(cannonball-dx PRIVATE
 
 option(APPLE_USE_ANGLE "Apple: render through a GLES2 driver (e.g. ANGLE) instead of the OpenGL framework" OFF)
 
-if(APPLE AND NOT APPLE_USE_ANGLE)
+if(CB_IOS)
+  # iOS: the system OpenGL ES 2.0 framework (deprecated by Apple but shipped).
+  target_link_libraries(cannonball-dx PRIVATE "-framework OpenGLES")
+  target_compile_definitions(cannonball-dx PRIVATE GLES_SILENCE_DEPRECATION)
+elseif(APPLE AND NOT APPLE_USE_ANGLE)
   # macOS: render through the system OpenGL framework (legacy 2.1 context).
   # See src/main/sdl2/gl_platform.hpp.
   find_package(OpenGL REQUIRED)
@@ -489,8 +530,8 @@ target_link_libraries(cannonball-dx PRIVATE
   ${_TINYXML2_TARGET}
   $<$<PLATFORM_ID:Windows>:unofficial::angle::libEGL>
   $<$<PLATFORM_ID:Windows>:unofficial::angle::libGLESv2>
-  $<$<NOT:$<PLATFORM_ID:Windows,Darwin>>:PkgConfig::EGL>
-  $<$<NOT:$<PLATFORM_ID:Windows,Darwin>>:PkgConfig::GLESv2>
+  $<$<NOT:$<PLATFORM_ID:Windows,Darwin,iOS>>:PkgConfig::EGL>
+  $<$<NOT:$<PLATFORM_ID:Windows,Darwin,iOS>>:PkgConfig::GLESv2>
 )
 
 # --- Linux: udev for joystick hotplugging ---
@@ -591,7 +632,7 @@ endif()
 
 
 # Add -march=native for GCC/Clang, only in Release builds
-if(WITH_MARCH_NATIVE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+if(WITH_MARCH_NATIVE AND NOT CMAKE_CROSSCOMPILING AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   if(CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo")
     target_compile_options(cannonball-dx PRIVATE
       $<$<COMPILE_LANGUAGE:C>:-march=native>
@@ -683,7 +724,7 @@ endif()
 
 # OpenMP: Try to enable, but don't require everywhere
 # Apple Clang ships without an OpenMP runtime; pick up Homebrew's libomp if present.
-if(APPLE AND NOT OpenMP_ROOT)
+if(APPLE AND NOT CB_IOS AND NOT OpenMP_ROOT)
   foreach(_omp_prefix /opt/homebrew/opt/libomp /usr/local/opt/libomp)
     if(EXISTS "${_omp_prefix}/include/omp.h")
       set(OpenMP_ROOT "${_omp_prefix}")
@@ -691,7 +732,10 @@ if(APPLE AND NOT OpenMP_ROOT)
     endif()
   endforeach()
 endif()
-find_package(OpenMP)
+# iOS has no OpenMP runtime; omp_compat.hpp provides serial fallbacks.
+if(NOT CB_IOS)
+    find_package(OpenMP)
+endif()
 if(OpenMP_CXX_FOUND)
     target_link_libraries(cannonball-dx PRIVATE OpenMP::OpenMP_CXX)
 endif()
@@ -713,9 +757,10 @@ if(APPLE)
     set(APPLE_APP_NAME  "CannonBall DX")
     set(APPLE_APP_ICON  "${CMAKE_SOURCE_DIR}/res/icon.png")
     set(APPLE_BUNDLE_ID "com.cannonball-dx.CannonBallDX")
+    set(APPLE_DEVELOPMENT_TEAM "")   # iOS device builds: your Apple team ID
 
     set(APPLE_OVERRIDES_FILE "${CMAKE_SOURCE_DIR}/apple-overrides.cmake"
-        CACHE FILEPATH "Optional CMake file overriding APPLE_APP_NAME/APPLE_APP_ICON/APPLE_BUNDLE_ID")
+        CACHE FILEPATH "Optional CMake file overriding APPLE_APP_NAME/APPLE_APP_ICON/APPLE_BUNDLE_ID/APPLE_DEVELOPMENT_TEAM")
     # Reconfigure when the overrides file is created, edited or removed.
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${APPLE_OVERRIDES_FILE}")
     if(EXISTS "${APPLE_OVERRIDES_FILE}")
@@ -740,7 +785,7 @@ endif()
 # linked back into the bundle. See macos_prepare_working_directory() in main.cpp.
 # The data folder name is fixed so renaming the app keeps existing ROMs/config.
 option(MACOS_APP_BUNDLE "Build a macOS .app bundle" ON)
-if(APPLE AND MACOS_APP_BUNDLE)
+if(APPLE AND NOT CB_IOS AND MACOS_APP_BUNDLE)
     file(READ "${main_cpp_base}/globals.hpp" _cb_globals_hpp_mac)
     string(REGEX MATCH "CANNONBALL_DX_VERSION[ \t]+\"([^\"]+)\"" _cb_unused "${_cb_globals_hpp_mac}")
     set(CB_MAC_VERSION "${CMAKE_MATCH_1}")
@@ -793,6 +838,70 @@ if(APPLE AND MACOS_APP_BUNDLE)
                     "$<TARGET_BUNDLE_DIR:cannonball-dx>" "${MACOS_CODESIGN_IDENTITY}"
             VERBATIM)
     endif()
+endif()
+
+# --- iOS app ---------------------------------------------------------------------
+# Configure with -G Xcode -DCMAKE_SYSTEM_NAME=iOS. The app keeps config and saves
+# in Library/Application Support and reads ROMs from Documents, which the Files
+# app shows (see apple_prepare_working_directory() in main.cpp).
+if(CB_IOS)
+    file(READ "${main_cpp_base}/globals.hpp" _cb_globals_hpp_ios)
+    string(REGEX MATCH "CANNONBALL_DX_VERSION[ \t]+\"([^\"]+)\"" _cb_unused "${_cb_globals_hpp_ios}")
+    set(CB_IOS_VERSION "${CMAKE_MATCH_1}")
+    set(CB_IOS_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum iOS version")
+
+    # App icon: a single 1024x1024 asset-catalog image; Xcode derives the rest.
+    set(_cb_xcassets "${CMAKE_CURRENT_BINARY_DIR}/ios/Assets.xcassets")
+    file(MAKE_DIRECTORY "${_cb_xcassets}/AppIcon.appiconset")
+    execute_process(
+        COMMAND sips -s format png -z 1024 1024 "${APPLE_APP_ICON}"
+                --out "${_cb_xcassets}/AppIcon.appiconset/AppIcon-1024.png"
+        OUTPUT_QUIET RESULT_VARIABLE _cb_sips_rc)
+    if(NOT _cb_sips_rc EQUAL 0)
+        message(FATAL_ERROR "Could not convert ${APPLE_APP_ICON} to a 1024x1024 PNG")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${APPLE_APP_ICON}")
+    file(WRITE "${_cb_xcassets}/Contents.json"
+        "{ \"info\" : { \"author\" : \"xcode\", \"version\" : 1 } }\n")
+    file(WRITE "${_cb_xcassets}/AppIcon.appiconset/Contents.json" [=[
+{
+  "images" : [
+    { "filename" : "AppIcon-1024.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}
+]=])
+    # Game resources go in the bundle root (iOS bundles are flat). Listing them
+    # as resources lets Xcode's Copy Bundle Resources phase copy and sign them;
+    # res/ is added as a folder reference so its layout is kept.
+    # UIScene lifecycle adoption for SDL2 (required on iOS 27+).
+    enable_language(OBJCXX)
+    target_sources(cannonball-dx PRIVATE "${CMAKE_SOURCE_DIR}/platform/ios/ios_scene.mm")
+    set_source_files_properties("${CMAKE_SOURCE_DIR}/platform/ios/ios_scene.mm"
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_link_libraries(cannonball-dx PRIVATE "-framework UIKit")
+
+    set(_cb_ios_resources
+        "${_cb_xcassets}"
+        "${CMAKE_SOURCE_DIR}/res"
+        "${CMAKE_SOURCE_DIR}/roms/roms.txt")
+    target_sources(cannonball-dx PRIVATE ${_cb_ios_resources})
+
+    set_target_properties(cannonball-dx PROPERTIES
+        MACOSX_BUNDLE TRUE
+        OUTPUT_NAME "${APPLE_APP_NAME}"
+        RESOURCE "${_cb_ios_resources}"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/platform/ios/Info.plist.in"
+        MACOSX_BUNDLE_BUNDLE_NAME "${APPLE_APP_NAME}"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "${APPLE_BUNDLE_ID}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${CB_IOS_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${CB_IOS_VERSION}"
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${APPLE_BUNDLE_ID}"
+        XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "${CB_IOS_DEPLOYMENT_TARGET}"
+        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
+        XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+        XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${APPLE_DEVELOPMENT_TEAM}")
 endif()
 
 # Copy out config files

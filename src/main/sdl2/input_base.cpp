@@ -29,7 +29,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __linux__
 #include <libudev.h>
+#endif
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
@@ -347,6 +349,7 @@ void Input::open_joy()
                     // printf("Product ID: 0x%04x\n", product);
                 }
 
+#ifdef __linux__
                 // Next, try and find the device via udev
                 // Create a new udev context.
                 struct udev* udev = udev_new();
@@ -407,6 +410,7 @@ void Input::open_joy()
                     udev_enumerate_unref(enumerate);
                     udev_unref(udev);
                 } // if (!udev)/else
+#endif // __linux__
             } // if (SDL_GameControllerHasRumble(controller))/else
 #endif
         } // if (SDL_IsGameController(pad_id))

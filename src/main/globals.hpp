@@ -8,6 +8,12 @@
 // to the previous version macro internally. Active branding uses DX.
 #define CANNONBALL_SE_VERSION CANNONBALL_DX_VERSION
 
+// Application name shown in the window title. Apple builds can override it
+// at configure time (APPLE_APP_NAME in CMakeLists.txt).
+#ifndef CB_APP_NAME
+#define CB_APP_NAME "CannonBall DX"
+#endif
+
 // ------------------------------------------------------------------------------------------------
 // Compiler Settings
 // ------------------------------------------------------------------------------------------------

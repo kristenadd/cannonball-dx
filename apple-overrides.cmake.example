@@ -1,0 +1,19 @@
+# Apple branding overrides
+#
+# Copy this file to apple-overrides.cmake (git-ignored) in the source root and
+# edit it to rebrand the macOS app (and future iOS/visionOS builds) without
+# changing tracked files. CMake re-runs automatically when the file changes.
+# To keep it elsewhere, configure with -DAPPLE_OVERRIDES_FILE=/path/to/file.
+#
+# Any line you leave out keeps its default.
+
+# App name: the .app/executable name, menu bar name and window title.
+# Default: "CannonBall DX"
+# set(APPLE_APP_NAME "My Racer")
+
+# Icon image (PNG or any format sips can read), ideally 1024x1024.
+# Relative paths are relative to the source root. Default: res/icon.png
+# set(APPLE_APP_ICON "/path/to/Icon.png")
+
+# Bundle identifier. Default: com.cannonball-dx.CannonBallDX
+# set(APPLE_BUNDLE_ID "com.example.MyRacer")

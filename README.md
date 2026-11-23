@@ -114,6 +114,10 @@ CannonBall already included steering-wheel force feedback. CannonBall DX **exten
 
 - **Windows 10/11 (64-bit)**
 
+### Builds and runs (early port)
+
+- **macOS 14+ on Apple silicon**: builds natively and runs as a `.app`. Wheels and force feedback are untested. See `docs/Compiling-On-macOS.txt`.
+
 ### Not tested with CannonBall DX
 
 - Linux
@@ -399,6 +403,18 @@ See:
 `docs/Compiling-On-Windows.txt`
 
 The features documented here are included in the **`master`** branch.
+
+### macOS
+
+Install the dependencies with Homebrew, then build with CMake:
+
+```bash
+brew install cmake ninja pkgconf sdl2 tinyxml2 mpg123 libomp
+cmake -S . -B build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-macos
+```
+
+This produces a self-contained `build-macos/CannonBall DX.app`, with its libraries bundled, so it runs on Macs without Homebrew. Put `outrun.zip` in `~/Library/Application Support/CannonBall DX/roms/` (the app creates this folder on first launch). See `docs/Compiling-On-macOS.txt` for details.
 
 ### Linux (Untested)
 

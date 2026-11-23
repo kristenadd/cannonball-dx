@@ -8,7 +8,7 @@
 // 0xFF = transparent and 0x0 = fully black.
 
 #include <SDL.h>
-#include <SDL_opengles2.h>
+#include "gl_platform.hpp"
 
 #include <string>
 #include <unordered_map>
@@ -45,7 +45,9 @@ static const char* kDefaultFS =
 // ---------------- Internal helpers ----------------
 static GLuint compile(GLenum type, const char* src) {
     GLuint s = glCreateShader(type);
-    glShaderSource(s, 1, &src, nullptr);
+    const std::string adapted = adapt_shader_source(src);
+    const char* adapted_src = adapted.c_str();
+    glShaderSource(s, 1, &adapted_src, nullptr);
     glCompileShader(s);
     GLint ok = 0;
     glGetShaderiv(s, GL_COMPILE_STATUS, &ok);

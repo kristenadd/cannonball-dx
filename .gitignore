@@ -1,2 +1,4 @@
 .vs/
 build/
+build-macos/
+apple-overrides.cmake

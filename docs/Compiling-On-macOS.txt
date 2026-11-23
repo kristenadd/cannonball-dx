@@ -53,6 +53,19 @@ build, turn off the bundle:
     ln -s /path/to/your/roms roms
     ./cannonball-dx
 
+Custom app name and icon
+------------------------
+Copy apple-overrides.cmake.example to apple-overrides.cmake in the source
+root and set any of:
+
+    set(APPLE_APP_NAME  "My Racer")              # .app name, menu bar, window title
+    set(APPLE_APP_ICON  "/path/to/Icon.png")     # ideally 1024x1024
+    set(APPLE_BUNDLE_ID "com.example.MyRacer")
+
+apple-overrides.cmake is git-ignored, so local branding never gets committed.
+The next build picks up changes automatically. The data folder stays
+~/Library/Application Support/CannonBall DX whatever the app is called.
+
 CMake options specific to macOS
 -------------------------------
 MACOS_APP_BUNDLE  (ON)   Build "CannonBall DX.app" instead of a bare executable.

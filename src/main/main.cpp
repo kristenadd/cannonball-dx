@@ -1167,7 +1167,7 @@ int main(int argc, char* argv[]) {
         std::cout << "$ SDL_VIDEODRIVER=""wayland"" build/cannonball-dx" << std::endl;
     }
 #endif
-    SDL_SetHint(SDL_HINT_APP_NAME, "CannonBall DX");
+    SDL_SetHint(SDL_HINT_APP_NAME, CB_APP_NAME);
     //SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "1");
     if (SDL_Init(   SDL_INIT_TIMER | SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER |
                     SDL_INIT_HAPTIC | SDL_INIT_EVENTS) == -1) {

@@ -704,10 +704,41 @@ if(WIN32)
     )
 endif()
 
+# --- Apple branding overrides --------------------------------------------------
+# Defaults below can be overridden by an untracked apple-overrides.cmake in the
+# source root (git-ignored; see apple-overrides.cmake.example), or by pointing
+# APPLE_OVERRIDES_FILE elsewhere. Used by the macOS app and future iOS/visionOS
+# targets.
+if(APPLE)
+    set(APPLE_APP_NAME  "CannonBall DX")
+    set(APPLE_APP_ICON  "${CMAKE_SOURCE_DIR}/res/icon.png")
+    set(APPLE_BUNDLE_ID "com.cannonball-dx.CannonBallDX")
+
+    set(APPLE_OVERRIDES_FILE "${CMAKE_SOURCE_DIR}/apple-overrides.cmake"
+        CACHE FILEPATH "Optional CMake file overriding APPLE_APP_NAME/APPLE_APP_ICON/APPLE_BUNDLE_ID")
+    # Reconfigure when the overrides file is created, edited or removed.
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${APPLE_OVERRIDES_FILE}")
+    if(EXISTS "${APPLE_OVERRIDES_FILE}")
+        include("${APPLE_OVERRIDES_FILE}")
+        message(STATUS "Apple overrides: ${APPLE_OVERRIDES_FILE}")
+    endif()
+
+    # Relative icon paths are relative to the source root.
+    get_filename_component(APPLE_APP_ICON "${APPLE_APP_ICON}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+    if(NOT EXISTS "${APPLE_APP_ICON}")
+        message(FATAL_ERROR "APPLE_APP_ICON not found: ${APPLE_APP_ICON}")
+    endif()
+    message(STATUS "Apple app: \"${APPLE_APP_NAME}\" (${APPLE_BUNDLE_ID}), icon ${APPLE_APP_ICON}")
+
+    # Window title and SDL app name follow the app name.
+    target_compile_definitions(cannonball-dx PRIVATE "CB_APP_NAME=\"${APPLE_APP_NAME}\"")
+endif()
+
 # --- macOS .app bundle ----------------------------------------------------------
-# Produces "CannonBall DX.app". At launch the app runs from
+# Produces "<APPLE_APP_NAME>.app". At launch the app runs from
 # ~/Library/Application Support/CannonBall DX (config, saves, roms/), with res/
 # linked back into the bundle. See macos_prepare_working_directory() in main.cpp.
+# The data folder name is fixed so renaming the app keeps existing ROMs/config.
 option(MACOS_APP_BUNDLE "Build a macOS .app bundle" ON)
 if(APPLE AND MACOS_APP_BUNDLE)
     file(READ "${main_cpp_base}/globals.hpp" _cb_globals_hpp_mac)
@@ -716,23 +747,30 @@ if(APPLE AND MACOS_APP_BUNDLE)
 
     set_target_properties(cannonball-dx PROPERTIES
         MACOSX_BUNDLE TRUE
-        OUTPUT_NAME "CannonBall DX"
-        MACOSX_BUNDLE_BUNDLE_NAME "CannonBall DX"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "com.cannonball-dx.CannonBallDX"
+        OUTPUT_NAME "${APPLE_APP_NAME}"
+        MACOSX_BUNDLE_BUNDLE_NAME "${APPLE_APP_NAME}"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "${APPLE_BUNDLE_ID}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${CB_MAC_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${CB_MAC_VERSION}"
-        MACOSX_BUNDLE_ICON_FILE "cannonball.icns")
+        MACOSX_BUNDLE_ICON_FILE "AppIcon.icns")
 
-    # App icon from res/icon.png.
-    set(_cb_iconset "${CMAKE_CURRENT_BINARY_DIR}/cannonball.iconset")
-    set(_cb_icns "${CMAKE_CURRENT_BINARY_DIR}/cannonball.icns")
+    # App icon: every standard size, scaled from APPLE_APP_ICON (1024x1024 recommended).
+    set(_cb_iconset "${CMAKE_CURRENT_BINARY_DIR}/AppIcon.iconset")
+    set(_cb_icns "${CMAKE_CURRENT_BINARY_DIR}/AppIcon.icns")
+    set(_cb_icon_cmds)
+    foreach(_sz 16 32 128 256 512)
+        math(EXPR _sz2 "${_sz} * 2")
+        list(APPEND _cb_icon_cmds
+            COMMAND sips -s format png -z ${_sz} ${_sz} "${APPLE_APP_ICON}" --out "${_cb_iconset}/icon_${_sz}x${_sz}.png"
+            COMMAND sips -s format png -z ${_sz2} ${_sz2} "${APPLE_APP_ICON}" --out "${_cb_iconset}/icon_${_sz}x${_sz}@2x.png")
+    endforeach()
     add_custom_command(OUTPUT "${_cb_icns}"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_cb_iconset}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_cb_iconset}"
-        COMMAND sips -z 128 128 "${CMAKE_SOURCE_DIR}/res/icon.png" --out "${_cb_iconset}/icon_128x128.png" >/dev/null
-        COMMAND sips -z 256 256 "${CMAKE_SOURCE_DIR}/res/icon.png" --out "${_cb_iconset}/icon_256x256.png" >/dev/null
-        COMMAND sips -z 512 512 "${CMAKE_SOURCE_DIR}/res/icon.png" --out "${_cb_iconset}/icon_512x512.png" >/dev/null
+        ${_cb_icon_cmds}
         COMMAND iconutil -c icns "${_cb_iconset}" -o "${_cb_icns}"
-        DEPENDS "${CMAKE_SOURCE_DIR}/res/icon.png"
+        DEPENDS "${APPLE_APP_ICON}"
+        COMMENT "Generating AppIcon.icns from ${APPLE_APP_ICON}"
         VERBATIM)
     target_sources(cannonball-dx PRIVATE "${_cb_icns}")
     set_source_files_properties("${_cb_icns}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)

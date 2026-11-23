@@ -29,7 +29,7 @@
 #include <omp.h>
 #include <math.h>
 #include <cmath>   // std::sqrtf, std::fabs, std::roundf, std::lroundf, etc.
-#include <SDL_opengles2.h>
+#include "gl_platform.hpp"
 #include <array>   // for std::array
 
 #define VERTEX_SHADER        "res/Cannonball-Shader-Vertex.glsl"
@@ -571,11 +571,7 @@ bool RenderSurface::init_sdl(int video_mode)
     // --------------------------------------------------------
     // Request an OpenGL ES2 context (for desktop & mobile)
     // --------------------------------------------------------
-    SDL_SetHint(SDL_HINT_OPENGL_ES_DRIVER, "1");   // tell SDL to prefer ANGLE/GLES
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,   2);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,   0);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER,            1);
+    glb::request_context_attributes();
 
     // Create a window manually so that it can be closed on video restart (e.g. Blargg on/off)
     // Now create our window (with an OpenGL flag)

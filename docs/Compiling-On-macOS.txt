@@ -1,0 +1,78 @@
+Compiling CannonBall DX on macOS
+================================
+
+Requirements
+------------
+- macOS 14 or later (developed on Apple silicon; Intel Macs should also work)
+- Xcode or the Xcode Command Line Tools (Apple Clang 15+ for C++23)
+- Homebrew (https://brew.sh)
+
+1. Install dependencies
+
+    brew install cmake ninja pkgconf sdl2 tinyxml2 mpg123 libomp
+
+   libomp provides OpenMP, which Apple Clang does not ship. CMake finds it
+   automatically under /opt/homebrew/opt/libomp or /usr/local/opt/libomp.
+
+2. Configure and build
+
+    cmake -S . -B build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release
+    cmake --build build-macos
+
+   The first configure downloads the pinned miniz and Mesen2 (xBRZ/HQx)
+   sources, as on other platforms.
+
+   Output: build-macos/CannonBall DX.app
+
+3. Add ROMs
+
+   Launch the app once. It creates its data folder:
+
+    ~/Library/Application Support/CannonBall DX/
+
+   Copy outrun.zip (or the extracted Revision B ROM files) into the roms/
+   folder there. config.xml, high scores and play stats are kept in the same
+   folder. Its res/ entry is a link back into the app bundle and is refreshed
+   on every launch.
+
+Running from the build folder (development)
+-------------------------------------------
+To get a plain executable that uses the current directory like the Linux
+build, turn off the bundle:
+
+    cmake -S . -B build-macos -DMACOS_APP_BUNDLE=OFF
+    cmake --build build-macos
+    cd build-macos
+    ln -s ../res res
+    ln -s /path/to/your/roms roms
+    ./cannonball-dx
+
+CMake options specific to macOS
+-------------------------------
+MACOS_APP_BUNDLE  (ON)   Build "CannonBall DX.app" instead of a bare executable.
+APPLE_USE_ANGLE   (OFF)  Render through a GLES2 driver (ANGLE) instead of the
+                         system OpenGL framework. Needs ANGLE's libEGL.dylib and
+                         libGLESv2.dylib where SDL can load them.
+
+How the port works
+------------------
+- Rendering: the renderer is written against OpenGL ES 2.0. macOS has no
+  native GLES, so src/main/sdl2/gl_platform.hpp creates a legacy OpenGL 2.1
+  context and translates the GLSL ES shaders to GLSL 1.20 at load time
+  (removes precision statements and adds a #version 120 prelude). Apple has
+  deprecated OpenGL but still ships it.
+- Threading: AppKit only allows event pumping on the main thread, so macOS
+  keeps game logic on the main thread like the Windows build (at most 3
+  threads: main plus 2 renderer threads).
+- Linux-only features are disabled on macOS: udev hidraw rumble lookup (SDL
+  rumble is still used), CPU core pinning and the hardware watchdog.
+
+Known limitations
+-----------------
+- The app links Homebrew's dylibs (SDL2, tinyxml2, mpg123, libomp), so it
+  only runs on Macs that have those installed. It is not yet self-contained
+  or code-signed for distribution.
+- Force feedback wheels (DirectInput on Windows) are not supported. SDL
+  gamepad rumble works.
+- iOS and visionOS need a different renderer (Metal, or ANGLE's Metal
+  backend), because OpenGL is not available on visionOS and is deprecated on iOS.

@@ -446,7 +446,18 @@ target_include_directories(cannonball-dx PRIVATE
   ${_SDL2_INCLUDE_DIRS}               # present on all platforms
 )
 
-if(NOT WIN32)
+option(APPLE_USE_ANGLE "Apple: render through a GLES2 driver (e.g. ANGLE) instead of the OpenGL framework" OFF)
+
+if(APPLE AND NOT APPLE_USE_ANGLE)
+  # macOS: render through the system OpenGL framework (legacy 2.1 context).
+  # See src/main/sdl2/gl_platform.hpp.
+  find_package(OpenGL REQUIRED)
+  target_link_libraries(cannonball-dx PRIVATE OpenGL::GL)
+  target_compile_definitions(cannonball-dx PRIVATE GL_SILENCE_DEPRECATION)
+elseif(APPLE)
+  # macOS with ANGLE: SDL loads libEGL/libGLESv2 at runtime; only headers are needed.
+  target_compile_definitions(cannonball-dx PRIVATE CANNONBALL_USE_GLES)
+elseif(NOT WIN32)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(EGL    REQUIRED IMPORTED_TARGET egl)
   pkg_check_modules(GLESv2 REQUIRED IMPORTED_TARGET glesv2)
@@ -478,8 +489,8 @@ target_link_libraries(cannonball-dx PRIVATE
   ${_TINYXML2_TARGET}
   $<$<PLATFORM_ID:Windows>:unofficial::angle::libEGL>
   $<$<PLATFORM_ID:Windows>:unofficial::angle::libGLESv2>
-  $<$<NOT:$<PLATFORM_ID:Windows>>:PkgConfig::EGL>
-  $<$<NOT:$<PLATFORM_ID:Windows>>:PkgConfig::GLESv2>
+  $<$<NOT:$<PLATFORM_ID:Windows,Darwin>>:PkgConfig::EGL>
+  $<$<NOT:$<PLATFORM_ID:Windows,Darwin>>:PkgConfig::GLESv2>
 )
 
 # --- Linux: udev for joystick hotplugging ---
@@ -522,8 +533,11 @@ else()
     target_compile_options(cannonball-dx PRIVATE -Wall -Wextra -Wpedantic)
 
     # Optimize Release builds aggressively (-Ofast) on GCC/Clang
-    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         target_compile_options(cannonball-dx PRIVATE $<$<CONFIG:Release>:-Ofast>)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # Clang deprecated -Ofast; this is its documented equivalent.
+        target_compile_options(cannonball-dx PRIVATE "$<$<CONFIG:Release>:-O3;-ffast-math>")
     endif()
 endif()
 
@@ -668,6 +682,15 @@ if(ENABLE_PROFILING)
 endif()
 
 # OpenMP: Try to enable, but don't require everywhere
+# Apple Clang ships without an OpenMP runtime; pick up Homebrew's libomp if present.
+if(APPLE AND NOT OpenMP_ROOT)
+  foreach(_omp_prefix /opt/homebrew/opt/libomp /usr/local/opt/libomp)
+    if(EXISTS "${_omp_prefix}/include/omp.h")
+      set(OpenMP_ROOT "${_omp_prefix}")
+      break()
+    endif()
+  endforeach()
+endif()
 find_package(OpenMP)
 if(OpenMP_CXX_FOUND)
     target_link_libraries(cannonball-dx PRIVATE OpenMP::OpenMP_CXX)
@@ -679,6 +702,48 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:cannonball-dx> $<TARGET_FILE_DIR:cannonball-dx>
         COMMAND_EXPAND_LISTS
     )
+endif()
+
+# --- macOS .app bundle ----------------------------------------------------------
+# Produces "CannonBall DX.app". At launch the app runs from
+# ~/Library/Application Support/CannonBall DX (config, saves, roms/), with res/
+# linked back into the bundle. See macos_prepare_working_directory() in main.cpp.
+option(MACOS_APP_BUNDLE "Build a macOS .app bundle" ON)
+if(APPLE AND MACOS_APP_BUNDLE)
+    file(READ "${main_cpp_base}/globals.hpp" _cb_globals_hpp_mac)
+    string(REGEX MATCH "CANNONBALL_DX_VERSION[ \t]+\"([^\"]+)\"" _cb_unused "${_cb_globals_hpp_mac}")
+    set(CB_MAC_VERSION "${CMAKE_MATCH_1}")
+
+    set_target_properties(cannonball-dx PROPERTIES
+        MACOSX_BUNDLE TRUE
+        OUTPUT_NAME "CannonBall DX"
+        MACOSX_BUNDLE_BUNDLE_NAME "CannonBall DX"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.cannonball-dx.CannonBallDX"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${CB_MAC_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${CB_MAC_VERSION}"
+        MACOSX_BUNDLE_ICON_FILE "cannonball.icns")
+
+    # App icon from res/icon.png.
+    set(_cb_iconset "${CMAKE_CURRENT_BINARY_DIR}/cannonball.iconset")
+    set(_cb_icns "${CMAKE_CURRENT_BINARY_DIR}/cannonball.icns")
+    add_custom_command(OUTPUT "${_cb_icns}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_cb_iconset}"
+        COMMAND sips -z 128 128 "${CMAKE_SOURCE_DIR}/res/icon.png" --out "${_cb_iconset}/icon_128x128.png" >/dev/null
+        COMMAND sips -z 256 256 "${CMAKE_SOURCE_DIR}/res/icon.png" --out "${_cb_iconset}/icon_256x256.png" >/dev/null
+        COMMAND sips -z 512 512 "${CMAKE_SOURCE_DIR}/res/icon.png" --out "${_cb_iconset}/icon_512x512.png" >/dev/null
+        COMMAND iconutil -c icns "${_cb_iconset}" -o "${_cb_icns}"
+        DEPENDS "${CMAKE_SOURCE_DIR}/res/icon.png"
+        VERBATIM)
+    target_sources(cannonball-dx PRIVATE "${_cb_icns}")
+    set_source_files_properties("${_cb_icns}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+
+    # Copy res/ and the ROM readme into Contents/Resources on every build.
+    add_custom_command(TARGET cannonball-dx POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_SOURCE_DIR}/res" "$<TARGET_BUNDLE_CONTENT_DIR:cannonball-dx>/Resources/res"
+        COMMAND ${CMAKE_COMMAND} -E copy
+                "${CMAKE_SOURCE_DIR}/roms/roms.txt" "$<TARGET_BUNDLE_CONTENT_DIR:cannonball-dx>/Resources/roms.txt"
+        VERBATIM)
 endif()
 
 # Copy out config files

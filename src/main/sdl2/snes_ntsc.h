@@ -87,6 +87,9 @@ extern "C" {
 #if defined(_MSC_VER)  // MSVC (Windows)
     #include <stdlib.h>
     #define bswap32(x) _byteswap_ulong(x)
+#elif defined(__APPLE__)
+    #include <libkern/OSByteOrder.h>
+    #define bswap32(x) OSSwapInt32(x)
 #else                  // glibc / Linux / other GCC-like
     #include <byteswap.h>
     #define bswap32(x) bswap_32(x)

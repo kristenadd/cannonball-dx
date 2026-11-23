@@ -7,7 +7,7 @@
 #include "hqx.h"
 
 #include <SDL.h>
-#include <SDL_opengles2.h>
+#include "sdl2/gl_platform.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>

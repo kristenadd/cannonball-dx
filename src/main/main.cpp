@@ -671,6 +671,10 @@ void pin_thread_to_core(std::thread& t, int core_id) {
         std::cerr << "Error setting affinity for thread to core: "
                   << "CannonBall DX does not support thread pinning on Windows" << "\n";
     return;
+#elif defined(__APPLE__)
+    // macOS has no hard CPU affinity API; the scheduler places threads itself.
+    (void)t; (void)core_id;
+    return;
 #else
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
@@ -714,9 +718,10 @@ static int main_loop() {
     // Determine if we'll be using threaded or sequential rendering
     int threads = cannonball::game_threads;
 
-#ifdef WIN32
-    // On Windows, input must be on the main thread. We therefore cap the thread-count to 3,
-    // thereby setting prepare_threads to 0 (below)
+#if defined(WIN32) || defined(__APPLE__)
+    // On Windows and macOS, input must be on the main thread (on macOS AppKit
+    // aborts if events are pumped elsewhere). We therefore cap the thread-count
+    // to 3, thereby setting prepare_threads to 0 (below)
     if (threads > 3) threads = 3;
 #else
     // On Linux, we can use up to 4 threads
@@ -1034,9 +1039,57 @@ static bool parse_command_line(int argc, char* argv[]) {
 }
 
 
+#ifdef __APPLE__
+#include <filesystem>
+// When launched as a .app bundle the working directory is "/", but CannonBall
+// resolves config.xml, res/ and roms/ relative to it. Run from a per-user data
+// folder instead (~/Library/Application Support/CannonBall DX) and point its
+// res/ at the bundle's read-only resources. ROMs go in that folder's roms/.
+static void macos_prepare_working_directory()
+{
+    namespace fs = std::filesystem;
+    char* base = SDL_GetBasePath();   // .../CannonBall DX.app/Contents/Resources/ when bundled
+    if (!base) return;
+    const std::string base_path(base);
+    SDL_free(base);
+    if (base_path.find(".app/Contents/Resources") == std::string::npos)
+        return;                       // plain command-line build: keep the caller's cwd
+
+    char* pref = SDL_GetPrefPath(nullptr, "CannonBall DX");
+    if (!pref) return;
+    const fs::path data_dir(pref);
+    SDL_free(pref);
+
+    std::error_code ec;
+    fs::current_path(data_dir, ec);
+    if (ec) {
+        std::cerr << "Unable to use data folder " << data_dir << ": " << ec.message() << std::endl;
+        return;
+    }
+
+    // Refresh the res link every launch so it follows the app if it is moved.
+    const fs::path res_link = data_dir / "res";
+    const fs::path bundle_res = fs::path(base_path) / "res";
+    if (fs::is_symlink(res_link, ec))
+        fs::remove(res_link, ec);
+    if (!fs::exists(res_link, ec))
+        fs::create_directory_symlink(bundle_res, res_link, ec);
+
+    const fs::path roms_dir = data_dir / "roms";
+    if (!fs::exists(roms_dir, ec)) {
+        fs::create_directories(roms_dir, ec);
+        fs::copy_file(bundle_res.parent_path() / "roms.txt", roms_dir / "roms.txt", ec);
+    }
+    std::cout << "Data folder: " << data_dir.string() << std::endl;
+}
+#endif
+
 int main(int argc, char* argv[]) {
 #ifdef __linux__
     install_segv_handler();
+#endif
+#ifdef __APPLE__
+    macos_prepare_working_directory();
 #endif
 #ifdef _WIN32
     // Keep SDL drawable pixels aligned with the monitor the window is actually

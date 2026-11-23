@@ -44,15 +44,13 @@
 #undef reset_axis_config
 #undef set_rumble
 
-#ifdef __APPLE__
-#include <TargetConditionals.h>
-#endif
+#include "apple_platform.hpp"
 
 // The Exit system action quits the game. iOS apps must not quit themselves
 // (it looks like a crash), so there it opens the frontend menu instead.
 static void request_exit()
 {
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if CB_APPLE_MOBILE
     if (cannonball::state == cannonball::STATE_GAME)
         cannonball::state = cannonball::STATE_INIT_MENU;
 #else

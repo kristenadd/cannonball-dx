@@ -26,6 +26,7 @@
 #include <cstring>      // std::memcpy
 
 #include "video.hpp"
+#include "stereo_layers.hpp"
 #include "globals.hpp"
 #include "frontend/config.hpp"
 #include "engine/oroad.hpp"
@@ -83,6 +84,11 @@ try
     // Initialize both buffers to all zeros using std::memset
     std::memset(pixel_buffers[0], 0, size);
     std::memset(pixel_buffers[1], 0, size);
+#if CB_VISIONOS
+    // Stereo depth layers, sized and padded like the frame buffers. Always
+    // allocated on visionOS so 3D DEPTH can be toggled without a restart.
+    stereo::allocate(config.s16_width, config.s16_height, alignment);
+#endif
 
     // Convert S16 tiles to a more useable format
     const bool hires = config.video.hires != 0;
@@ -124,6 +130,8 @@ void Video::swap_buffers()
 //std::cout << std::hex << "Video::swap_buffers: pixel_buffers[0/1]: " << pixel_buffers[0] << "/" << pixel_buffers[1] << std::dec << "\n";
     current_pixel_buffer ^= 1;
     pixels = pixel_buffers[current_pixel_buffer] + alignment;
+    if (stereo::allocated())
+        stereo::swap();
     renderer->swap_buffers();
 }
 
@@ -134,6 +142,7 @@ void Video::disable()
     if (pixel_buffers[0]) { ::operator delete(pixel_buffers[0], std::align_val_t(alignment)); pixel_buffers[0] = nullptr; }
     if (pixel_buffers[1]) { ::operator delete(pixel_buffers[1], std::align_val_t(alignment)); pixel_buffers[1] = nullptr; }
     pixels = nullptr;
+    stereo::release();
     enabled = false;
 }
 
@@ -258,10 +267,27 @@ void Video::prepare_frame()
         tile_layer->render_tile_layer(pixels, 1, 0);      // background layer
         tile_layer->render_tile_layer(pixels, 0, 0);      // foreground layer
 
-        if (!config.engine.fix_bugs || oroad.horizon_base != ORoad::HORIZON_OFF)
-            (hwroad.*hwroad.render_foreground)(pixels);
+        // Stereo: road, sprites and text go to their own depth layers; the
+        // frame buffer keeps the far background (road background + tiles).
+        const bool layered = stereo::active() && stereo::allocated();
+        uint16_t* road_dst = pixels;
+        uint16_t* text_dst = pixels;
+        uint16_t* sprite_dst[stereo::SPRITE_LAYERS] = {};
+        if (layered)
+        {
+            stereo::begin_frame();
+            road_dst = stereo::draw_layer(stereo::LAYER_ROAD);
+            text_dst = stereo::draw_layer(stereo::LAYER_TEXT);
+            for (int i = 0; i < stereo::SPRITE_LAYERS; ++i)
+                sprite_dst[i] = stereo::draw_layer(stereo::LAYER_SPRITE0 + i);
+        }
 
+        if (!config.engine.fix_bugs || oroad.horizon_base != ORoad::HORIZON_OFF)
+            (hwroad.*hwroad.render_foreground)(road_dst);
+
+        sprite_layer->depth_layers = layered ? sprite_dst : nullptr;
         sprite_layer->render(pixels, 8);
+        sprite_layer->depth_layers = nullptr;
 
         // The edited 21:9 side art represents the final appearance of the
         // ultrawide margins. Draw it after sprites so legacy sprite fragments
@@ -269,8 +295,8 @@ void Video::prepare_frame()
         // and is rendered afterwards as usual.
         music_side_art::render(pixels);
 
-        tile_layer->render_text_layer(pixels, 1);
-        tile_layer->render_text_scroll_overlay(pixels, 1);
+        tile_layer->render_text_layer(text_dst, 1);
+        tile_layer->render_text_scroll_overlay(text_dst, 1);
     }
 }
 

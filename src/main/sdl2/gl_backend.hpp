@@ -7,6 +7,13 @@
 // Overlay textures are applied as 8-bit (1 byte/pixel) alpha masks.
 // 0xFF = transparent and 0x0 = fully black.
 
+#include "apple_platform.hpp"
+
+#if CB_VISIONOS
+// No OpenGL ES on visionOS: same API implemented with SDL_Renderer (Metal).
+#include "sdlr_backend.hpp"
+#else
+
 #include <SDL.h>
 #include "gl_platform.hpp"
 
@@ -807,4 +814,29 @@ inline void set_overlay_rect_pixels_top_left(int x, int y, int w, int h){
     set_overlay_rect_pixels(x, yBL, w, h);
 }
 
+
+// ---------------- Context / window helpers (shared API with sdlr_backend) ----------------
+inline Uint32 window_flags() { return SDL_WINDOW_OPENGL; }
+inline void* create_context(SDL_Window* window) { return SDL_GL_CreateContext(window); }
+inline void destroy_context(void* context) { if (context) SDL_GL_DeleteContext(static_cast<SDL_GLContext>(context)); }
+inline void drawable_size(SDL_Window* window, int* w, int* h) { SDL_GL_GetDrawableSize(window, w, h); }
+inline int get_swap_interval() { return SDL_GL_GetSwapInterval(); }
+
+// Reallocate the game texture after set_game_pixel_format()/size changes.
+inline void reallocate_game_texture(int width, int height)
+{
+    G.gameW = width;
+    G.gameH = height;
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, G.texGame);
+    const bool rgb555 = G.gameFmt == State::PixFmt::RGB555;
+    glTexImage2D(GL_TEXTURE_2D, 0,
+                 rgb555 ? CB_GL_RGB5_A1_INTERNAL : GL_RGBA,
+                 width, height, 0, GL_RGBA,
+                 rgb555 ? GL_UNSIGNED_SHORT_5_5_5_1 : GL_UNSIGNED_BYTE,
+                 nullptr);
+}
+
 } // namespace glb
+
+#endif // CB_VISIONOS

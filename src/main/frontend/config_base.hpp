@@ -10,6 +10,9 @@
 
 #pragma once
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 #include <SDL.h>
 #include <set>
 #include <string>
@@ -84,6 +87,7 @@ struct video_settings_t
     int scale;
     int scanlines;
     int widescreen;
+    int stereo_depth;   // visionOS stereoscopic 3D: 0 = off, 1..3 = low/medium/high
     int fps;
     int fps_count;
     int hires;
@@ -320,6 +324,64 @@ public:
     void save_timetrial_scores();
     bool clear_scores();
     void set_fps(int fps);
+
+    // Frame rates. video.fps encodes the setting: 0 = 30, 2 = 60, 3 = 120,
+    // 4 = 90 (visionOS, whose display refreshes at 90 Hz and cannot show 120).
+    // Game logic ticks at 30 Hz; the extra frames move things in between.
+    static int fps_from_setting(int setting)
+    {
+        return setting == 0 ? 30 : setting == 3 ? 120 : setting == 4 ? 90 : 60;
+    }
+    static int setting_from_fps(int rate)
+    {
+        return rate == 30 ? 0 : rate == 120 ? 3 : rate == 90 ? 4 : 2;
+    }
+    // Frame rates offered in the menu, in cycle order.
+    static const int* frame_rate_options(int& count)
+    {
+#if defined(__APPLE__) && TARGET_OS_VISION
+        static const int options[] = { 30, 60, 90 };
+#else
+        static const int options[] = { 30, 60, 120 };
+#endif
+        count = static_cast<int>(sizeof(options) / sizeof(options[0]));
+        return options;
+    }
+    static int next_frame_rate(int rate, int direction)
+    {
+        int count = 0;
+        const int* options = frame_rate_options(count);
+        int index = 0;
+        for (int i = 0; i < count; ++i)
+            if (options[i] == rate) index = i;
+        return options[(index + (direction < 0 ? count - 1 : 1)) % count];
+    }
+    // Scale a per-tick movement amount authored for 30 Hz to one frame.
+    // 60 and 120 keep their original shifts.
+    int32_t fps_per_frame(int32_t v30) const
+    {
+        switch (tick_fps)
+        {
+            case 60:  return v30 >> 1;
+            case 120: return v30 >> 2;
+            case 90:  return v30 >= 0 ? v30 / 3 : -((-v30 + 2) / 3);   // floor, like >>
+            default:  return v30;
+        }
+    }
+    // Whether this frame runs the arcade's 60 Hz (V-Blank) work: every frame
+    // at 30/60, every other frame at 120, two of every three frames at 90.
+    bool vblank_60hz_frame(int frame) const
+    {
+        if (fps == 120) return (frame & 1) == 0;
+        if (fps == 90)  return (frame % 3) != 2;
+        return true;
+    }
+    // Whether this frame runs 30 Hz animation work.
+    bool tick_30hz_frame(int frame) const
+    {
+        const int divisor = fps >= 60 ? fps / 30 : 1;
+        return (frame % divisor) == 0;
+    }
     void inc_time();
     void inc_traffic();
 

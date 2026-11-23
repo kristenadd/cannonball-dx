@@ -15,9 +15,7 @@
 #include "renderbase.hpp"
 #include <iostream>
 #include <utility>
-#ifdef __APPLE__
-#include <TargetConditionals.h>
-#endif
+#include "apple_platform.hpp"
 
 
 RenderBase::RenderBase()
@@ -51,7 +49,7 @@ bool RenderBase::sdl_screen_size(int display_index)
         return false;
     }
 
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if CB_IOS
     // The iOS app is landscape-only, but SDL2 only refreshes the display mode
     // on a status-bar rotation notification that scene-based apps no longer
     // receive, so it can still report portrait dimensions.

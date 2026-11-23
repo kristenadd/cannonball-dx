@@ -10,12 +10,12 @@
 // Define CANNONBALL_USE_GLES on Apple platforms to use a real GLES2 driver
 // instead (e.g. ANGLE's libEGL/libGLESv2, which SDL can load on macOS).
 
+#include "apple_platform.hpp"
+
+#if !CB_VISIONOS   // visionOS has no OpenGL ES: see sdlr_backend.hpp
+
 #include <SDL.h>
 #include <string>
-
-#if defined(__APPLE__)
-    #include <TargetConditionals.h>
-#endif
 
 // macOS uses desktop OpenGL; iOS/tvOS use the system OpenGL ES framework.
 #if defined(__APPLE__) && TARGET_OS_OSX && !defined(CANNONBALL_USE_GLES)
@@ -37,7 +37,7 @@
 // OpenGL ES 2.0 requires internalformat == format, and the iOS driver enforces
 // it (a sized GL_RGB5_A1 fails and leaves the screen black). Other drivers
 // accept the sized format, so keep their tested behaviour unchanged.
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if CB_IOS
     #define CB_GL_RGB5_A1_INTERNAL GL_RGBA
 #else
     #define CB_GL_RGB5_A1_INTERNAL GL_RGB5_A1
@@ -104,3 +104,5 @@ inline std::string adapt_shader_source(const char* src)
 }
 
 } // namespace glb
+
+#endif // !CB_VISIONOS

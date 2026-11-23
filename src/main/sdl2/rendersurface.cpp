@@ -20,6 +20,23 @@
 #include <iostream>
 #include <mutex>
 #include "rendersurface.hpp"
+#include "apple_platform.hpp"
+
+#include "stereo_layers.hpp"
+#include <vector>
+
+#if CB_VISIONOS
+// platform/visionos/visionos_window.mm
+extern "C" void cb_visionos_set_window_aspect(double aspect);
+// platform/visionos/StereoOverlay.swift. layers: LAYER_COUNT RGBA8 images
+// (nullptr = empty layer), or count 0 to hide the overlay.
+// Layer l covers rows first_rows[l] .. first_rows[l] + row_counts[l] - 1 of a
+// width x height frame; its pixels hold only those rows.
+extern "C" void cb_visionos_stereo_update(const uint32_t* const* layers,
+                                          const int32_t* first_rows, const int32_t* row_counts,
+                                          int32_t count, int32_t width, int32_t height,
+                                          int32_t depth_level, float road_top);
+#endif
 #include "frontend/config.hpp"
 #include "display_utils.hpp"
 // Aligned Memory Allocation (standard C++17)
@@ -29,7 +46,6 @@
 #include "omp_compat.hpp"
 #include <math.h>
 #include <cmath>   // std::sqrtf, std::fabs, std::roundf, std::lroundf, etc.
-#include "gl_platform.hpp"
 #include <array>   // for std::array
 
 #define VERTEX_SHADER        "res/Cannonball-Shader-Vertex.glsl"
@@ -143,7 +159,7 @@ void RenderSurface::disable()
     glb::shutdown();
 
     // delete the SDL‑GL context
-    if (glContext) { SDL_GL_DeleteContext(glContext); glContext = nullptr; }
+    if (glContext) { glb::destroy_context(glContext); glContext = nullptr; }
 
     // destroy window and quit SDL_gpu
     if (window) { SDL_DestroyWindow(window); window = nullptr; }
@@ -287,6 +303,17 @@ bool RenderSurface::sync_display_state()
     if (!window || !initialised)
         return false;
 
+#if CB_VISIONOS
+    // visionOS windows are resized by the system and the user (and by our own
+    // aspect request) without SDL window events, so watch the drawable size.
+    {
+        int w = 0, h = 0;
+        glb::drawable_size(window, &w, &h);
+        if (w > 0 && h > 0 && (w != drawable_width_cache || h != drawable_height_cache))
+            mark_display_dirty();
+    }
+#endif
+
     // Event callbacks only mark the state dirty. All SDL/GL mutation happens
     // here, once from the render thread after the event burst has settled.
     if (!display_dirty.exchange(false, std::memory_order_acq_rel))
@@ -321,7 +348,7 @@ bool RenderSurface::sync_display_state()
 
     int drawable_width = 0;
     int drawable_height = 0;
-    SDL_GL_GetDrawableSize(window, &drawable_width, &drawable_height);
+    glb::drawable_size(window, &drawable_width, &drawable_height);
     if (drawable_width <= 0 || drawable_height <= 0)
     {
         mark_display_dirty();
@@ -509,6 +536,11 @@ void RenderSurface::set_scaling()
         dst_rect.y = 0;
         dst_rect.h = scn_height;
         dst_rect.w = scn_width;
+        // No black bars unless the branches below add them. Without this reset
+        // a display that exactly matches the image aspect (e.g. a visionOS
+        // window shaped to the game) kept the previous layout's offset.
+        anchor_x = 0;
+        anchor_y = 0;
 
         if (config.video.widescreen != 3) {
             // Preserve the selected game aspect ratio. Aspect mode 3 deliberately
@@ -579,7 +611,7 @@ bool RenderSurface::init_sdl(int video_mode)
     window = SDL_CreateWindow(CB_APP_NAME,
         SDL_WINDOWPOS_CENTERED_DISPLAY(target_display),
         SDL_WINDOWPOS_CENTERED_DISPLAY(target_display),
-        scn_width, scn_height, SDL_WINDOW_OPENGL);
+        scn_width, scn_height, glb::window_flags());
 
     if (!window) {
         std::cerr << "Window creation failed: " << SDL_GetError() << std::endl;
@@ -595,7 +627,7 @@ bool RenderSurface::init_sdl(int video_mode)
     display_event_watch_registered = true;
 
     // Create the ES context
-    glContext = SDL_GL_CreateContext(window);
+    glContext = glb::create_context(window);
     if (!glContext) {
         std::cerr << "Failed to create GLES context: " << SDL_GetError() << std::endl;
         return false;
@@ -682,6 +714,15 @@ bool RenderSurface::init_sdl(int video_mode)
         return false;
     }
 
+#if CB_VISIONOS
+    // Shape the window like the selected game image. Stretched fills a 4:3
+    // window, as on a 4:3 arcade monitor.
+    const double window_aspect = (config.video.widescreen == 3)
+        ? 4.0 / 3.0
+        : static_cast<double>(src_width) / static_cast<double>(src_height);
+    cb_visionos_set_window_aspect(window_aspect);
+#endif
+
     //--------------------------------------------------------
     // Create CPU surfaces for the game image.
     //--------------------------------------------------------
@@ -709,7 +750,7 @@ bool RenderSurface::init_sdl(int video_mode)
     SDL_FillRect(GameSurface[0], NULL, black_color);
     SDL_FillRect(GameSurface[1], NULL, black_color);
 
-    SDL_GL_GetDrawableSize(window, &drawable_width_cache, &drawable_height_cache);
+    glb::drawable_size(window, &drawable_width_cache, &drawable_height_cache);
     display_dirty.store(false, std::memory_order_release);
 
     // screen_pixels = static_cast<uint32_t*>(surface->pixels);
@@ -1250,6 +1291,7 @@ bool RenderSurface::finalize_frame()
 
     // ultimately calls SDL_GL_SwapWindow
     glb::present();
+    present_stereo_layers();
 
     // notify disable() that we're done
     activity_counter.fetch_sub(1, std::memory_order_acq_rel);
@@ -1724,4 +1766,88 @@ void RenderSurface::draw_frame(uint16_t* pixels, int fastpass)
     activity_counter.fetch_sub(1, std::memory_order_acq_rel);
     std::unique_lock<std::mutex> lock(mtx);
     cv.notify_all();  // In case disable() is waiting
+}
+
+
+// ----------------------------------------------------------------------------------
+// visionOS stereoscopic layers
+// ----------------------------------------------------------------------------------
+void RenderSurface::present_stereo_layers()
+{
+#if CB_VISIONOS
+    static bool overlay_visible = false;
+    if (!stereo::active() || !stereo::allocated())
+    {
+        if (overlay_visible)
+        {
+            cb_visionos_stereo_update(nullptr, nullptr, nullptr, 0, 0, 0, 0, 0.0f);
+            overlay_visible = false;
+        }
+        return;
+    }
+
+    const int w = stereo::buffers().width;
+    const int h = stereo::buffers().height;
+
+    // Palette index -> premultiplied RGBA8 (bytes R,G,B,A), from the same
+    // 5-5-5-1 palette the main image uses.
+    static uint32_t palette[S16_PALETTE_ENTRIES * 2];
+    for (int i = 0; i < S16_PALETTE_ENTRIES * 2; ++i)
+    {
+        const uint32_t v = s16_rgb555[i];
+        const uint32_t r5 = (v >> 11) & 31, g5 = (v >> 6) & 31, b5 = (v >> 1) & 31;
+        palette[i] = 0xFF000000u |
+                     (((b5 << 3) | (b5 >> 2)) << 16) |
+                     (((g5 << 3) | (g5 >> 2)) << 8) |
+                      ((r5 << 3) | (r5 >> 2));
+    }
+    // Shadow over nothing: translucent black (hardware shadows keep ~63%).
+    const uint32_t shadow_pixel = static_cast<uint32_t>(255 * (1.0f - 0.63f) + 0.5f) << 24; // hardware shadow = 63%
+
+    static std::vector<uint32_t> rgba[stereo::LAYER_COUNT];
+    const uint32_t* layers[stereo::LAYER_COUNT] = {};
+    int32_t first_rows[stereo::LAYER_COUNT] = {};
+    int32_t row_counts[stereo::LAYER_COUNT] = {};
+    float road_top = 1.0f;
+
+    for (int l = 0; l < stereo::LAYER_COUNT; ++l)
+    {
+        const uint16_t* src = stereo::present_layer(l);
+        const stereo::RowRange range = stereo::present_rows(l);
+        if (!src || range.last < range.first)
+            continue;
+
+        const int rows = range.last - range.first + 1;
+        rgba[l].resize(static_cast<size_t>(w) * rows);
+        uint32_t* dst = rgba[l].data();
+        int first_used = -1, last_used = -1;
+        for (int r = 0; r < rows; ++r)
+        {
+            const uint16_t* s = src + static_cast<size_t>(range.first + r) * w;
+            uint32_t* d = dst + static_cast<size_t>(r) * w;
+            bool row_any = false;
+            for (int x = 0; x < w; ++x)
+            {
+                const uint16_t v = s[x];
+                if (!stereo::is_empty(v)) { d[x] = palette[v & (S16_PALETTE_ENTRIES * 2 - 1)]; row_any = true; }
+                else if (stereo::is_shadow_over_empty(v)) { d[x] = shadow_pixel; row_any = true; }
+                else d[x] = 0;
+            }
+            if (row_any) { if (first_used < 0) first_used = r; last_used = r; }
+        }
+        if (first_used < 0)
+            continue;
+
+        // Trim fully transparent rows so the overlay uploads only what's used.
+        layers[l] = dst + static_cast<size_t>(first_used) * w;
+        first_rows[l] = range.first + first_used;
+        row_counts[l] = last_used - first_used + 1;
+        if (l == stereo::LAYER_ROAD)
+            road_top = static_cast<float>(first_rows[l]) / static_cast<float>(h);
+    }
+
+    cb_visionos_stereo_update(layers, first_rows, row_counts, stereo::LAYER_COUNT, w, h,
+                              config.video.stereo_depth, road_top);
+    overlay_visible = true;
+#endif
 }

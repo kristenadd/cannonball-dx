@@ -28,9 +28,7 @@
 #include "directx/ffeedback.hpp"
 
 #define Menu MenuLegacy
-#ifdef __APPLE__
-#include <TargetConditionals.h>
-#endif
+#include "apple_platform.hpp"
 #include "menu_legacy.hpp.inc"
 #undef Menu
 
@@ -1006,7 +1004,7 @@ protected:
             const bool selected = direction == 0 && select_pressed();
             if (direction != 0 || selected)
             {
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if CB_IOS
                 // FULL matches the device's screen shape; offered on iOS.
                 static const int ASPECT_ORDER[] = { video_settings_t::ASPECT_FULL, 0, 1, 4, 2, 3 };
 #else

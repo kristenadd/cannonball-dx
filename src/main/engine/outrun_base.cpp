@@ -181,7 +181,7 @@ void Outrun::vint()
     otiles.write_tilemap_hw();
     osprites.update_sprites();
 
-    const bool tick_60hz = config.fps != 120 || ((cannonball::frame & 1) == 0);
+    const bool tick_60hz = config.vblank_60hz_frame(cannonball::frame);
     if (tick_60hz)
     {
         otiles.update_tilemaps(cannonball_mode == MODE_ORIGINAL ? ostats.cur_stage : 0);

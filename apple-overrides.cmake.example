@@ -1,7 +1,7 @@
 # Apple branding overrides
 #
 # Copy this file to apple-overrides.cmake (git-ignored) in the source root and
-# edit it to rebrand the macOS app (and future iOS/visionOS builds) without
+# edit it to rebrand the macOS and iOS apps (and future visionOS builds) without
 # changing tracked files. CMake re-runs automatically when the file changes.
 # To keep it elsewhere, configure with -DAPPLE_OVERRIDES_FILE=/path/to/file.
 #
@@ -17,3 +17,7 @@
 
 # Bundle identifier. Default: com.cannonball-dx.CannonBallDX
 # set(APPLE_BUNDLE_ID "com.example.MyRacer")
+
+# Apple Developer team ID, needed to sign iOS builds for a real device
+# (Xcode > Settings > Accounts shows it). Default: empty (simulator only).
+# set(APPLE_DEVELOPMENT_TEAM "ABCDE12345")

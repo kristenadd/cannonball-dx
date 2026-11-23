@@ -14,6 +14,7 @@
     Modifications for CannonBall-SE (c) 2005 James Pearce
 ***************************************************************************/
 
+#include "engine/widescreen_layout.hpp"
 #include "../trackloader.hpp"
 
 #include "engine/oanimseq.hpp"
@@ -496,7 +497,7 @@ void OSprites::sprite_copy()
         // the left and right. Do not copy the framebuffer or any other scenery.
         // function_holder == 2 is the cloud routine and pal_src 0xCD is set by
         // OLevelObjs::sprite_clouds immediately before the entry is ordered.
-        if (config.video.widescreen == 2 &&
+        if (widescreen_layout::wider_than_16_9() &&
             oroad.stage_lookup_off == 0x10 &&
             entry->function_holder == 2 &&
             entry->pal_src == 0xCD &&

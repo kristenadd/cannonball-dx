@@ -202,7 +202,9 @@ public:
             menu_main.push_back(ENTRY_PLAYGAME);
             menu_main.push_back(ENTRY_SETTINGS);
             menu_main.push_back(ENTRY_ABOUT);
-            menu_main.push_back(ENTRY_EXIT);
+#if !(defined(__APPLE__) && TARGET_OS_IPHONE)
+            menu_main.push_back(ENTRY_EXIT);   // iOS apps are closed from the app switcher
+#endif
 
             menu_settings.clear();
             menu_settings.push_back("CONTROLS");

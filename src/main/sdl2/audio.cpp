@@ -20,7 +20,9 @@
 
 #include <iostream>
 #include <SDL.h>
+#ifdef WITH_MP3
 #include <mpg123.h>         // to enable mp3 file music
+#endif
 
 #include "sdl2/wav123.hpp"  // WAV "mpg123-like" decoder
 #include <cctype>
@@ -66,6 +68,7 @@ static inline bool has_ext_ci(const std::string& path, const char* ext) {
     return e == ext;
 }
 
+#ifdef WITH_MP3
 static const MpgLike kMp3Api = {
     &mpg123_init, &mpg123_exit,
     (void*(*)(const char*,int*))&mpg123_new,
@@ -81,6 +84,7 @@ static const MpgLike kMp3Api = {
     MPG123_ENC_SIGNED_16,
     MPG123_OK, MPG123_ERR, MPG123_DONE
 };
+#endif
 
 static const MpgLike kWavApi = {
     &wav123_init, &wav123_exit,
@@ -97,6 +101,11 @@ static const MpgLike kWavApi = {
     WAV123_ENC_SIGNED_16,
     WAV123_OK, WAV123_ERR, WAV123_DONE
 };
+
+#ifndef WITH_MP3
+// Built without mpg123: Config::get_custom_music() never offers .mp3 tracks.
+static const MpgLike& kMp3Api = kWavApi;
+#endif
 } // namespace
 
 
@@ -109,7 +118,9 @@ static constexpr uint32_t FADE_LEN     = (1u << FADE_BITS);
 Audio::~Audio()
 {
     stop_audio();
+#ifdef WITH_MP3
     mpg123_exit();
+#endif
     wav123_exit();
 }
 
@@ -117,9 +128,11 @@ void Audio::init()
 {
     if (config.sound.enabled) {
         // Initialize MP3 decoder (once)
+#ifdef WITH_MP3
         if (mpg123_init() != MPG123_OK) {
             std::cerr << "Failed to init mpg123: " << mpg123_plain_strerror(MPG123_ERR) << "\n";
         }
+#endif
         if (wav123_init() != 0) {
             std::cerr << "Failed to init wav123\n";
         }

@@ -116,6 +116,7 @@ CannonBall already included steering-wheel force feedback. CannonBall DX **exten
 
 ### Builds and runs (early port)
 
+- **iOS / iPadOS 15+**: runs in the Simulator; playable with a game controller or keyboard. There are no touch controls yet. See `docs/Compiling-On-iOS.txt`.
 - **macOS 14+ on Apple silicon**: builds natively and runs as a `.app`. Wheels and force feedback are untested. See `docs/Compiling-On-macOS.txt`.
 
 ### Not tested with CannonBall DX
@@ -415,6 +416,14 @@ cmake --build build-macos
 ```
 
 This produces a self-contained `build-macos/CannonBall DX.app`, with its libraries bundled, so it runs on Macs without Homebrew. Put `outrun.zip` in `~/Library/Application Support/CannonBall DX/roms/` (the app creates this folder on first launch). See `docs/Compiling-On-macOS.txt` for details.
+
+### iOS / iPadOS
+
+```bash
+cmake -S . -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+```
+
+Open `build-ios/cannonball-dx.xcodeproj` in Xcode and run it on a simulator or device. Add `outrun.zip` to the app's folder in the Files app. See `docs/Compiling-On-iOS.txt` for command-line builds and device signing.
 
 ### Linux (Untested)
 

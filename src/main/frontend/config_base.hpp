@@ -76,6 +76,10 @@ struct video_settings_t
     const static int MODE_STRETCH   = 2; // Legacy config value; migrated on load
     const static int MODE_EXCLUSIVE = 3; // Exclusive fullscreen using desktop mode
 
+    // Aspect (widescreen) values: 0=4:3, 1=16:9, 2=21:9, 3=stretched, 4=16:10,
+    // 5=FULL (game width chosen to match the display's aspect ratio).
+    const static int ASPECT_FULL    = 5;
+
     int mode;
     int scale;
     int scanlines;

@@ -4,6 +4,7 @@
 #include "frontend/config.hpp"
 #include "engine/outrun.hpp"
 #include "video.hpp"
+#include "engine/widescreen_layout.hpp"
 
 #include <array>
 #include <cstddef>
@@ -199,6 +200,10 @@ namespace music_side_art_corrections
         const int render_scale =
             config.video.hires < 0 ? 1 :
             (config.video.hires > 3 ? 4 : config.video.hires + 1);
+        // Centre the 536-wide canvas on the current width and clip.
+        x -= widescreen_layout::side_art_shift();
+        if (x < 0 || x >= widescreen_layout::native_width())
+            return;
         const int physical_x = x * render_scale;
         const int physical_y = y * render_scale;
         uint16_t* dst =
@@ -215,7 +220,7 @@ namespace music_side_art_corrections
     inline void render(uint16_t* buffer)
     {
         if (!buffer ||
-            config.video.widescreen != 2 ||
+            !widescreen_layout::wider_than_16_9() ||
             (outrun.game_state != GS_INIT_MUSIC &&
              outrun.game_state != GS_MUSIC))
         {

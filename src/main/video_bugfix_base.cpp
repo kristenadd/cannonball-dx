@@ -151,6 +151,26 @@ int Video::set_video_mode(video_settings_t* settings)
 {
     switch (settings->widescreen)
     {
+    case video_settings_t::ASPECT_FULL:
+    {
+        // Pick the game width that matches the display, so the image fills it
+        // without stretching. Limited to the 4:3..21:9 range the engine's
+        // widescreen art covers, and kept a multiple of 4 like the presets.
+        int width = S16_WIDTH_WIDE;
+        SDL_DisplayMode mode{};
+        if (SDL_GetCurrentDisplayMode(0, &mode) == 0 && mode.w > 0 && mode.h > 0)
+        {
+            const int long_side  = std::max(mode.w, mode.h);  // landscape game
+            const int short_side = std::min(mode.w, mode.h);
+            width = static_cast<int>(
+                (static_cast<double>(S16_HEIGHT) * long_side / short_side + 2.0) / 4.0) * 4;
+        }
+        width = std::clamp(width, static_cast<int>(S16_WIDTH), static_cast<int>(S16_WIDTH_ULTRAWIDE));
+        config.s16_width = static_cast<uint16_t>(width);
+        config.s16_x_off = (width - S16_WIDTH) / 2;
+        break;
+    }
+
     case 4: // 16:10
         config.s16_width = S16_WIDTH_16_10;
         config.s16_x_off = (S16_WIDTH_16_10 - S16_WIDTH) / 2;

@@ -1,6 +1,6 @@
 // singleCorePi.hpp
 #pragma once
-#include <omp.h>
+#include "omp_compat.hpp"
 #include <fstream>
 #include <string>
 #include <algorithm>

@@ -251,6 +251,10 @@ struct State {
 
     // We target GLES2 everywhere
     bool isGLES = true;
+
+    // Framebuffer that presents to the window. 0 on most platforms, but on
+    // iOS SDL renders through its own framebuffer object.
+    GLuint defaultFbo = 0;
 };
 
 //static State G; // internal linkage in each TU using this header
@@ -351,6 +355,11 @@ inline bool init(SDL_Window* window,
     SDL_GL_GetDrawableSize(G.window, &G.fbW, &G.fbH);
     glViewport(0, 0, G.fbW, G.fbH);
 
+    // Remember the window's framebuffer before we create any of our own.
+    GLint boundFbo = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &boundFbo);
+    G.defaultFbo = static_cast<GLuint>(boundFbo);
+
     // Assume GLES on all our targets
     G.isGLES = true;
 
@@ -359,7 +368,7 @@ inline bool init(SDL_Window* window,
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, G.texGame);
 
-    GLenum game_ifmt = (G.gameFmt == State::PixFmt::RGB555) ? GL_RGB5_A1 : GL_RGBA;
+    GLenum game_ifmt = (G.gameFmt == State::PixFmt::RGB555) ? CB_GL_RGB5_A1_INTERNAL : GL_RGBA;
     GLenum game_fmt  = (G.gameFmt == State::PixFmt::RGB555) ? GL_RGBA    : GL_RGBA;
     GLenum game_type = (G.gameFmt == State::PixFmt::RGB555) ? GL_UNSIGNED_SHORT_5_5_5_1 : GL_UNSIGNED_BYTE;
 
@@ -415,7 +424,7 @@ inline bool init(SDL_Window* window,
         glGenFramebuffers(1, &G.fbo);
         glBindFramebuffer(GL_FRAMEBUFFER, G.fbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, G.texPass, 0);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, G.defaultFbo);
     }
 
     // Main program (game shader)
@@ -667,7 +676,7 @@ inline void draw(bool useOffscreen, bool drawOverlay) {
         glDrawArrays(GL_TRIANGLES, 0, 3);
 
         // 2) offscreen -> backbuffer, with optional overlay multiply
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, G.defaultFbo);
         int vx = 0, vy = 0, vw = G.fbW, vh = G.fbH;
         if (G.useDstRect) {
             vx = G.dstX; vw = G.dstW; vh = G.dstH; vy = 0 + G.dstY; // bottom-left origin
@@ -692,7 +701,7 @@ inline void draw(bool useOffscreen, bool drawOverlay) {
         glDrawArrays(GL_TRIANGLES, 0, 3);
     } else {
         // Single pass directly to backbuffer
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, G.defaultFbo);
         int vx = 0, vy = 0, vw = G.fbW, vh = G.fbH;
         if (G.useDstRect) {
             vx = G.dstX; vw = G.dstW; vh = G.dstH; vy = 0 + G.dstY; // bottom-left origin

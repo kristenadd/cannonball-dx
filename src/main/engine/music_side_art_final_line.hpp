@@ -7,7 +7,7 @@ namespace music_side_art_final_line
     inline void render(uint16_t* buffer)
     {
         if (!buffer ||
-            config.video.widescreen != 2 ||
+            !widescreen_layout::wider_than_16_9() ||
             (outrun.game_state != GS_INIT_MUSIC &&
              outrun.game_state != GS_MUSIC))
         {

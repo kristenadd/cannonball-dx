@@ -744,6 +744,17 @@ if(APPLE AND MACOS_APP_BUNDLE)
         COMMAND ${CMAKE_COMMAND} -E copy
                 "${CMAKE_SOURCE_DIR}/roms/roms.txt" "$<TARGET_BUNDLE_CONTENT_DIR:cannonball-dx>/Resources/roms.txt"
         VERBATIM)
+
+    # Copy Homebrew/third-party dylibs into Contents/Frameworks and point the
+    # executable at them, so the app runs on Macs without Homebrew.
+    option(MACOS_BUNDLE_DYLIBS "Copy non-system dylibs into the .app" ON)
+    set(MACOS_CODESIGN_IDENTITY "-" CACHE STRING "codesign identity for the bundle ('-' = ad-hoc)")
+    if(MACOS_BUNDLE_DYLIBS)
+        add_custom_command(TARGET cannonball-dx POST_BUILD
+            COMMAND "${CMAKE_SOURCE_DIR}/tools/macos/bundle-dylibs.sh"
+                    "$<TARGET_BUNDLE_DIR:cannonball-dx>" "${MACOS_CODESIGN_IDENTITY}"
+            VERBATIM)
+    endif()
 endif()
 
 # Copy out config files

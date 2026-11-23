@@ -24,6 +24,12 @@ Requirements
 
    Output: build-macos/CannonBall DX.app
 
+   The app is self-contained: after linking, tools/macos/bundle-dylibs.sh
+   copies the Homebrew libraries (SDL2, tinyxml2, mpg123, libomp) into
+   Contents/Frameworks, points the executable at them and ad-hoc signs the
+   bundle. It runs on Macs without Homebrew, on the same CPU architecture it
+   was built for.
+
 3. Add ROMs
 
    Launch the app once. It creates its data folder:
@@ -50,6 +56,10 @@ build, turn off the bundle:
 CMake options specific to macOS
 -------------------------------
 MACOS_APP_BUNDLE  (ON)   Build "CannonBall DX.app" instead of a bare executable.
+MACOS_BUNDLE_DYLIBS (ON) Copy non-system dylibs into Contents/Frameworks.
+MACOS_CODESIGN_IDENTITY ("-") Signing identity used after bundling. "-" is
+                         ad-hoc; set a Developer ID to sign for distribution
+                         (notarization is not automated yet).
 APPLE_USE_ANGLE   (OFF)  Render through a GLES2 driver (ANGLE) instead of the
                          system OpenGL framework. Needs ANGLE's libEGL.dylib and
                          libGLESv2.dylib where SDL can load them.
@@ -69,9 +79,13 @@ How the port works
 
 Known limitations
 -----------------
-- The app links Homebrew's dylibs (SDL2, tinyxml2, mpg123, libomp), so it
-  only runs on Macs that have those installed. It is not yet self-contained
-  or code-signed for distribution.
+- Builds are single-architecture (the host's). A universal arm64 + x86_64
+  app would need universal copies of the dependencies.
+- The app is ad-hoc signed by default and not notarized, so on another Mac
+  Gatekeeper blocks the first launch; right-click the app and choose Open,
+  or sign with a Developer ID and notarize it.
+- The bundled mpg123 is LGPL-2.1 (docs/LGPL-2.1.txt); SDL2 and tinyxml2 are
+  zlib-licensed; libomp is Apache-2.0 with LLVM exceptions.
 - Force feedback wheels (DirectInput on Windows) are not supported. SDL
   gamepad rumble works.
 - iOS and visionOS need a different renderer (Metal, or ANGLE's Metal

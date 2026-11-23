@@ -414,7 +414,7 @@ cmake -S . -B build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build-macos
 ```
 
-This produces `build-macos/CannonBall DX.app`. Put `outrun.zip` in `~/Library/Application Support/CannonBall DX/roms/` (the app creates this folder on first launch). See `docs/Compiling-On-macOS.txt` for details.
+This produces a self-contained `build-macos/CannonBall DX.app`, with its libraries bundled, so it runs on Macs without Homebrew. Put `outrun.zip` in `~/Library/Application Support/CannonBall DX/roms/` (the app creates this folder on first launch). See `docs/Compiling-On-macOS.txt` for details.
 
 ### Linux (Untested)
 

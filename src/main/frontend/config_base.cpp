@@ -246,8 +246,10 @@ void Config::load()
     // iOS fills the screen and visionOS fills its window; there are no
     // display modes. (The fullscreen path keeps the aspect within the area.)
     video.mode = video_settings_t::MODE_FULL;
-    // Always start on the main menu: on iOS it is the natural entry point,
-    // since there is no Exit and the Home button belongs to the system.
+#endif
+#ifdef __APPLE__
+    // Apple ports always start on the main menu (Play Game, Game Modes,
+    // Settings, About and, on macOS, Exit) rather than straight in the game.
     menu.enabled = 1;
 #endif
 

@@ -91,9 +91,17 @@ void OInputs::tick()
             if (signature.empty() || signature == "*")
                 continue;
 
+            // Standard GameController axes (stick, triggers) follow any game
+            // controller, matching Input's binding lookup. Raw axes stay tied
+            // to their device.
+            const bool any_gamepad =
+                active_group == 'G' &&
+                binding.index < Input::RAW_GAMEPAD_AXIS_BASE;
+
             for (const auto& device : input.get_devices())
             {
-                if (input.get_device_signature(device.instance_id) != signature)
+                if (!any_gamepad &&
+                    input.get_device_signature(device.instance_id) != signature)
                     continue;
 
                 // GAMEPAD bindings must belong to an SDL GameController.

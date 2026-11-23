@@ -329,9 +329,10 @@ static void process_events(void)
 
             case SDL_CONTROLLERBUTTONDOWN:
                 input.handle_controller_down(&event.cbutton);
-#if CB_APPLE_MOBILE
-                // iOS reserves the Home/PS/Guide button (the default Menu
-                // Access), so Select/Create/Back opens the menu as well.
+#ifdef __APPLE__
+                // Apple systems reserve the Home/PS/Guide button (the default
+                // Menu Access: on macOS it opens Launchpad or Game Center), so
+                // Select/Create/Back opens the menu as well.
                 if (event.cbutton.button == SDL_CONTROLLER_BUTTON_BACK)
                     input.set_menu_request(true);
 #endif
@@ -339,7 +340,7 @@ static void process_events(void)
 
             case SDL_CONTROLLERBUTTONUP:
                 input.handle_controller_up(&event.cbutton);
-#if CB_APPLE_MOBILE
+#ifdef __APPLE__
                 if (event.cbutton.button == SDL_CONTROLLER_BUTTON_BACK)
                     input.set_menu_request(false);
 #endif

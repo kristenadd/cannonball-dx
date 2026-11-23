@@ -194,6 +194,19 @@ namespace
         if (stored_signature == signature)
             return true;
 
+        // GAMEPAD bindings to standard SDL GameController buttons and axes
+        // mean the same thing on every controller (A, Start, right trigger,
+        // ...), so they follow whichever game controller is in use. Otherwise
+        // the first-run profile, materialized for the pad connected at the
+        // time, leaves every other controller unbound. Raw gamepad axes are
+        // device specific and keep the strict match below.
+        if (group == Input::BINDING_GAMEPAD &&
+            !(binding.type == device_binding_t::TYPE_AXIS &&
+              binding.index >= Input::RAW_GAMEPAD_AXIS_BASE))
+        {
+            return true;
+        }
+
         // SDL GUIDs can change across SDL revisions/backends. A VID/PID plus
         // the stable axis/button/hat shape is a conservative fallback.
         if (!binding.vid || !binding.pid ||
@@ -211,6 +224,33 @@ namespace
         }
 
         return false;
+    }
+
+    // R1/L1 are built-in digital throttle/brake for game controllers, next
+    // to the analog triggers (the matrix holds one binding per action, so the
+    // default profile can't bind both). A user binding of the shoulder button
+    // to anything else wins.
+    int shoulder_pedal_target(int button)
+    {
+        int target;
+        if (button == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)
+            target = device_binding_t::TARGET_ACCEL;
+        else if (button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER)
+            target = device_binding_t::TARGET_BRAKE;
+        else
+            return -1;
+
+        for (const auto& binding : config.controls.device_bindings)
+        {
+            if (binding.type == device_binding_t::TYPE_BUTTON &&
+                binding.index == button &&
+                binding_is_group(binding.device, Input::BINDING_GAMEPAD))
+            {
+                return -1;
+            }
+        }
+
+        return target;
     }
 
     int default_system_gamepad_button(int action)
@@ -280,7 +320,14 @@ namespace
 
         if (has_custom_binding)
         {
-            if (stored_device != signature ||
+            // Standard GameController inputs follow any game controller,
+            // as for the binding matrix (binding_matches_group_signature).
+            const bool any_gamepad =
+                group == Input::BINDING_GAMEPAD &&
+                !(type == device_binding_t::TYPE_AXIS &&
+                  index >= Input::RAW_GAMEPAD_AXIS_BASE);
+
+            if ((!any_gamepad && stored_device != signature) ||
                 stored_type != type ||
                 stored_index != index)
             {
@@ -1684,6 +1731,13 @@ void Input::handle_controller_down(SDL_ControllerButtonEvent* evt)
         }
     }
 
+    if (gamepad_runtime && capture_group == -1)
+    {
+        const int pedal = shoulder_pedal_target(evt->button);
+        if (pedal >= 0)
+            set_device_target(pedal, true);
+    }
+
     apply_device_button(
         evt->which,
         evt->button,
@@ -1761,6 +1815,13 @@ void Input::handle_controller_up(SDL_ControllerButtonEvent* evt)
             default:
                 break;
         }
+    }
+
+    if (gamepad_runtime && capture_group == -1)
+    {
+        const int pedal = shoulder_pedal_target(evt->button);
+        if (pedal >= 0)
+            set_device_target(pedal, false);
     }
 
     apply_device_button(

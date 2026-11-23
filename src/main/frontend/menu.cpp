@@ -983,9 +983,8 @@ bool Menu::select_pressed()
 
         if (starts_with_label(option, ENTRY_FRAME_RATE))
         {
-            int rate = config.fps;
-            rate = rate == 30 ? 60 : (rate == 60 ? 120 : 30);
-            config.video.fps = rate == 30 ? 0 : (rate == 120 ? 3 : 2);
+            const int rate = Config::next_frame_rate(config.fps, 1);
+            config.video.fps = Config::setting_from_fps(rate);
             config.set_fps(config.video.fps);
             menu_video[cursor] = std::string(ENTRY_FRAME_RATE) +
                                  std::to_string(rate) + " FPS";

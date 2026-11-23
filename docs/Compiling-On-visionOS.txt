@@ -1,0 +1,121 @@
+Compiling CannonBall DX for visionOS (Apple Vision Pro)
+=======================================================
+
+Requirements
+------------
+- macOS with Xcode 16 or later (visionOS SDK)
+- CMake 3.28+ (brew install cmake)
+- No other dependencies: SDL3 3.4.20, sdl2-compat 2.32.74 and tinyxml2 11.0.0
+  are downloaded and built automatically.
+
+The app runs as a window in the Shared Space, on visionOS 2.0 and later.
+
+1. Generate the Xcode project
+
+    cmake -S . -B build-visionos -G Xcode -DCMAKE_SYSTEM_NAME=visionOS -DCMAKE_OSX_DEPLOYMENT_TARGET=2.0
+
+2a. Simulator
+
+    xcodebuild -project build-visionos/cannonball-dx.xcodeproj -target cannonball-dx \
+        -configuration Release -sdk xrsimulator -arch arm64 build
+    xcrun simctl install booted "build-visionos/Release-xrsimulator/<App Name>.app"
+
+2b. Apple Vision Pro
+
+   Put your team ID in apple-overrides.cmake (APPLE_DEVELOPMENT_TEAM), then
+   either open the project in Xcode and Run on the device, or:
+
+    xcodebuild -project build-visionos/cannonball-dx.xcodeproj -target cannonball-dx \
+        -configuration Release -sdk xros -allowProvisioningUpdates build
+    xcrun devicectl device install app --device <UDID> "build-visionos/Release-xros/<App Name>.app"
+
+3. Add ROMs
+
+   As on iOS: copy outrun.zip into the app's folder in the Files app
+   (On My Apple Vision Pro > <App Name>), or for the simulator:
+
+    cp outrun.zip "$(xcrun simctl get_app_container booted <bundle id> data)/Documents/"
+
+Window and aspect ratio
+-----------------------
+The window takes the shape of the game image selected in Settings > Video >
+Aspect: 4:3 (the native 320x224 image), 16:10, 16:9 or 21:9. Stretched uses a
+4:3 window. The window keeps that shape when you resize it. There is no FULL
+aspect mode on visionOS.
+
+Stereoscopic 3D
+---------------
+Settings > Video > 3D DEPTH: OFF, LOW, MEDIUM (default) or HIGH. The game is
+split into depth layers that visionOS shows in stereo:
+
+  far       sky, scenery tiles and road background (the window plane)
+  road      the road surface, in 16 horizontal bands that come nearer
+            toward the bottom of the screen
+  sprites   16 layers matching the road bands: each sprite sits just in
+            front of the band containing its lowest row (where it touches
+            the road), so cars, trees and people stand on the road at its
+            depth and move toward you smoothly as they approach. Shadows
+            become translucent.
+  HUD       score, time and text, nearest
+
+Depth follows the screen row because, on OutRun's road, a row's distance
+below the horizon is proportional to 1 / distance, which is what stereo
+disparity follows. LOW, MEDIUM and HIGH bring the nearest road band 60, 120
+or 200 points in front of the window. Nearer layers are scaled slightly so
+they line up with the background from about 1.3 m in front of the window.
+Off-axis, small steps can appear between road bands; that's inherent to
+layered depth.
+
+Implementation: src/main/stereo_layers.hpp (layer buffers and sprite depth
+buckets), Video::prepare_frame (routes the road, sprite and text passes),
+hwsprites (per-sprite destination), RenderSurface::present_stereo_layers
+(palette -> RGBA) and platform/visionos/StereoOverlay.swift (a SwiftUI
+overlay over SDL's view that places each layer with offset(z:)).
+
+Frame rate
+----------
+Settings > Video > FRAME RATE offers 30, 60 and 90 FPS on visionOS; 90 is the
+default for new installs and matches the Vision Pro's display. 120 FPS isn't
+offered: the display cannot show it, and because the engine advances the
+game every frame, a 120 setting held to 90 by the display would run the game
+slowly. A saved 120 setting becomes 90. Game logic still ticks at the
+arcade's 30 Hz; at 90 the arcade's 60 Hz work runs on two of every three
+frames and per-frame movement is divided by three (Config::fps_per_frame,
+Config::vblank_60hz_frame).
+
+Controls
+--------
+Game controllers and keyboards work as on iOS. Tapping (pinching) the window,
+or pressing Select / Create / Back, opens the menu. The app starts on the menu
+and has no Exit entry.
+
+How the port works
+------------------
+- SDL2 does not support visionOS, but SDL3 does. The game keeps its SDL2 code
+  and uses sdl2-compat, which implements the SDL2 API on SDL3. SDL3 is
+  embedded as Frameworks/SDL3.framework and loaded by sdl2-compat at runtime,
+  so their SDL_* symbols never meet at link time. sdl2-compat is compiled
+  into the app, with three fixes applied at configure time for iOS-family
+  targets, which it does not build upstream, plus an extra SDL3 search path
+  for the flat iOS-family bundle layout (see CMakeLists.txt).
+- platform/visionos/uikit_main.c supplies main() (sdl2-compat has no UIKit
+  SDL2main), and platform/visionos/sdl2compat_uikit.m replaces sdl2-compat's
+  Cocoa-only helper file.
+- There is no OpenGL ES on visionOS. src/main/sdl2/sdlr_backend.hpp implements
+  the renderer's glb:: API with SDL_Renderer, which uses Metal on visionOS.
+  16-bit game frames are expanded to 32-bit on upload. The CRT shaders are
+  not available, but the overlay effects (scanlines etc.) still work.
+- SDL3 3.4 adopts the UIScene lifecycle itself.
+- The target mixes C++, Objective-C++ and Swift. C-family compiler flags are
+  limited to those languages, and the Swift library search path is set per
+  SDK because CMake records the configure-time (device) SDK.
+- platform/visionos/visionos_window.mm asks the window scene for the game's
+  shape with uniform resizing. visionOS resizes windows without SDL window
+  events, so the renderer polls the drawable size each frame.
+
+Known limitations
+-----------------
+- Stereo depth has only been checked in the simulator, which renders one
+  eye. Judge the effect and comfort on a Vision Pro.
+- No CRT shaders. No MP3 custom music.
+- Tested in the visionOS 27 simulator only.

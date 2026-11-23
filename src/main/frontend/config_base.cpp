@@ -16,9 +16,7 @@
     - Play stats load/save
 ***************************************************************************/
 
-#ifdef __APPLE__
-#include <TargetConditionals.h>
-#endif
+#include "apple_platform.hpp"
 #include <iostream>
 #include <fstream>   // for std::ifstream / std::ofstream
 #include <iterator>  // for std::istreambuf_iterator
@@ -211,11 +209,20 @@ void Config::load()
 
     video.mode          = cfg.get_int("video.mode",            1); // Video Mode: Default is Full Screen
     video.scale         = cfg.get_int("video.window.scale",    1); // Video Scale: Default is 1x
+#if CB_VISIONOS
+    // Vision Pro refreshes at 90 Hz: default to 90, and use 90 instead of 120.
+    video.fps           = cfg.get_int("video.fps",             4); // 0=30 FPS, 2=60 FPS, 4=90 FPS
+    if (video.fps == 3)
+        video.fps = 4;
+    if (video.fps != 0 && video.fps != 4)
+        video.fps = 2;
+#else
     video.fps           = cfg.get_int("video.fps",             2); // 0=30 FPS, 2=60 FPS, 3=120 FPS; default 60
     if (video.fps != 0 && video.fps != 3)
         video.fps = 2;
+#endif
     video.fps_count     = cfg.get_int("video.fps_counter",     0); // FPS Counter
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if CB_IOS
     // iOS defaults to FULL so the game fills the device's screen.
     video.widescreen    = cfg.get_int("video.widescreen",      video_settings_t::ASPECT_FULL);
 #else
@@ -235,15 +242,16 @@ void Config::load()
     {
         video.mode = video_settings_t::MODE_FULL;
     }
-#if defined(__APPLE__) && TARGET_OS_IPHONE
-    // iOS apps always fill the screen; there are no windows or display modes.
+#if CB_APPLE_MOBILE
+    // iOS fills the screen and visionOS fills its window; there are no
+    // display modes. (The fullscreen path keeps the aspect within the area.)
     video.mode = video_settings_t::MODE_FULL;
     // Always start on the main menu: on iOS it is the natural entry point,
     // since there is no Exit and the Home button belongs to the system.
     menu.enabled = 1;
 #endif
 
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if CB_IOS
     // One-time migration: configs written before FULL existed (or with the
     // old 4:3 default) switch to FULL once. After that the saved choice wins.
     if (cfg.get_int("video.ios_full_default", 0) == 0)
@@ -252,6 +260,19 @@ void Config::load()
 
     if (video.widescreen < 0 || video.widescreen > video_settings_t::ASPECT_FULL)
         video.widescreen = 0;
+#if !CB_IOS
+    // FULL depends on a fixed device screen; elsewhere use 4:3.
+    if (video.widescreen == video_settings_t::ASPECT_FULL)
+        video.widescreen = 0;
+#endif
+
+#if CB_VISIONOS
+    video.stereo_depth  = cfg.get_int("video.stereo_depth",    2); // visionOS 3D depth, default medium
+#else
+    video.stereo_depth  = 0;
+#endif
+    if (video.stereo_depth < 0 || video.stereo_depth > 3)
+        video.stereo_depth = 0;
 
     video.hires_next    =
     video.hires         = cfg.get_int("video.hires",           1); // Hi-Resolution Mode
@@ -477,10 +498,13 @@ bool Config::save()
     // JJP - CRT emulation settings
     cfg.put_int("video.mode",               video.mode);          // Video Mode: Full Screen (2)
     cfg.put_int("video.window.scale",       video.scale);         // Video Scale: 1x (1)
-    cfg.put_int("video.fps",                video.fps);           // Frame Rate: 0=30 FPS, 2=60 FPS, 3=120 FPS
+    cfg.put_int("video.fps",                video.fps);           // Frame Rate: 0=30 FPS, 2=60 FPS, 3=120 FPS, 4=90 FPS
     cfg.put_int("video.fps_counter",        video.fps_count);     // FPS Counter (0)
     cfg.put_int("video.widescreen",         video.widescreen);    // Widescreen Mode (1)
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if CB_VISIONOS
+    cfg.put_int("video.stereo_depth",       video.stereo_depth);  // 3D depth (visionOS)
+#endif
+#if CB_IOS
     cfg.put_int("video.ios_full_default",   1);                   // FULL default migration done
 #endif
     cfg.put_int("video.vsync",              video.vsync);         // V-Sync (1)
@@ -798,7 +822,7 @@ bool Config::clear_scores()
 void Config::set_fps(int fps)
 {
     video.fps = fps;
-    this->fps = video.fps == 0 ? 30 : (video.fps == 3 ? 120 : 60);
+    this->fps = fps_from_setting(video.fps);
     tick_fps = this->fps;
     cannonball::frame_ms = 1000.0 / this->fps;
 

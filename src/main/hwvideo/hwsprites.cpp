@@ -1,3 +1,4 @@
+#include "stereo_layers.hpp"
 #include "video.hpp"
 #include "hwvideo/hwsprites.hpp"
 #include "globals.hpp"
@@ -503,7 +504,7 @@ reps[i]++;\
 
 
 
-void hwsprites::render(uint16_t* pixels, const uint8_t priority)
+void hwsprites::render(uint16_t* frame_pixels, const uint8_t priority)
 {
     // Flipped sprite rows are cached. If the user changes the Ferrari detail
     // option at runtime, invalidate only that derived cache so the very next
@@ -764,6 +765,18 @@ std::cout << "\r\t\t\t\t" << processed_lines << " sprite lines flipped";
 
         const uint16_t scrn_width = config.s16_width;
         const unsigned span = (unsigned)(x2 - x1);
+
+        // Destination: the frame, or (stereo) the depth layer of the road
+        // band this sprite stands on, chosen from its lowest screen row.
+        uint16_t* pixels = frame_pixels;
+        if (depth_layers)
+        {
+            const int first_row = std::min(top, ytarget);
+            const int last_row  = std::max(top, ytarget);
+            const int band = stereo::sprite_band(last_row);
+            pixels = depth_layers[band];
+            stereo::note_rows(stereo::LAYER_SPRITE0 + band, first_row, last_row);
+        }
 
         // The original optimized renderer batches at most three identical
         // destination rows. 3x/4x can require more, so render one row per pass.

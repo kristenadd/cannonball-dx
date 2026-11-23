@@ -12,12 +12,20 @@
 cmake_minimum_required(VERSION 3.20)
 project(cannonball-dx)
 
-# iOS builds cross-compile with: -G Xcode -DCMAKE_SYSTEM_NAME=iOS
-# (see docs/Compiling-On-iOS.txt).
+# iOS and visionOS builds cross-compile with -G Xcode and
+# -DCMAKE_SYSTEM_NAME=iOS or visionOS (see docs/Compiling-On-iOS.txt and
+# docs/Compiling-On-visionOS.txt).
+set(CB_IOS FALSE)
+set(CB_VISIONOS FALSE)
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(CB_IOS TRUE)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
+    set(CB_VISIONOS TRUE)
+endif()
+if(CB_IOS OR CB_VISIONOS)
+    set(CB_APPLE_MOBILE TRUE)
 else()
-    set(CB_IOS FALSE)
+    set(CB_APPLE_MOBILE FALSE)
 endif()
 include(GNUInstallDirs)
 include(FetchContent)
@@ -77,8 +85,8 @@ option(PROFILE_WITH_CALLGRIND  "Reduce inlining for cleaner callgrind graphs" OF
 option(PIXEL_ACCURACY "Enable pixel-accurate sprite rendering" ON)
 
 # --- Option for MP3 playback ---
-if(CB_IOS)
-    # No mpg123 build for iOS yet; WAV and YM custom music still work.
+if(CB_APPLE_MOBILE)
+    # No mpg123 build for iOS/visionOS yet; WAV and YM custom music still work.
     option(WITH_MP3 "Enable MP3 playback via mpg123" OFF)
 else()
     option(WITH_MP3 "Enable MP3 playback via mpg123" ON)
@@ -433,6 +441,96 @@ if(CB_IOS)
     # SDL2main supplies main() and runs our (renamed) SDL_main inside UIKit.
     list(APPEND _SDL2_TARGETS SDL2::SDL2main SDL2::SDL2-static)
     set(_TINYXML2_TARGET tinyxml2::tinyxml2)
+elseif(CB_VISIONOS)
+    # visionOS: SDL2 does not support it, SDL3 does. Build SDL3 as an embedded
+    # framework and compile sdl2-compat (the SDL2 API implemented on SDL3) into
+    # the game. sdl2-compat loads SDL3 at runtime, so the two never link
+    # together and their SDL_* symbols cannot clash.
+    set(SDL_SHARED ON CACHE BOOL "" FORCE)
+    set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+    set(SDL_FRAMEWORK ON CACHE BOOL "" FORCE)
+    set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+    set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+    set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        cannonball_sdl3
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG release-3.4.20
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_Declare(
+        cannonball_sdl2compat
+        GIT_REPOSITORY https://github.com/libsdl-org/sdl2-compat.git
+        GIT_TAG release-2.32.74
+        GIT_SHALLOW TRUE
+    )
+    set(tinyxml2_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        cannonball_tinyxml2
+        GIT_REPOSITORY https://github.com/leethomason/tinyxml2.git
+        GIT_TAG 11.0.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(cannonball_sdl3 cannonball_tinyxml2)
+    FetchContent_GetProperties(cannonball_sdl2compat)
+    if(NOT cannonball_sdl2compat_POPULATED)
+        FetchContent_Populate(cannonball_sdl2compat)
+    endif()
+
+    # Patch the fetched sdl2-compat sources (idempotent):
+    # - its SDL3 search paths follow the macOS bundle layout; add the flat
+    #   Frameworks/ layout of iOS-family apps.
+    # - its iOS prototype for SDL_iPhoneSetAnimationCallback has unbalanced
+    #   parentheses (and lacks the callbackParam argument), so iOS-family
+    #   builds do not compile.
+    function(cb_patch_file path from to)
+        file(READ "${path}" _content)
+        string(FIND "${_content}" "${to}" _already)
+        if(_already EQUAL -1)
+            string(REPLACE "${from}" "${to}" _patched "${_content}")
+            if(_patched STREQUAL _content)
+                message(FATAL_ERROR "Could not patch ${path}")
+            endif()
+            file(WRITE "${path}" "${_patched}")
+        endif()
+    endfunction()
+    cb_patch_file("${cannonball_sdl2compat_SOURCE_DIR}/src/sdl2_compat.c"
+        "\"@executable_path/../Frameworks/\" SDL3_FRAMEWORK,"
+        "\"@executable_path/Frameworks/SDL3.framework/SDL3\", /* iOS-family app bundle */\n            \"@executable_path/../Frameworks/\" SDL3_FRAMEWORK,")
+    cb_patch_file("${cannonball_sdl2compat_SOURCE_DIR}/src/sdl2_protos.h"
+        "SDL2_PROTO(int,iPhoneSetAnimationCallback,(SDL_Window *a, int b, void (SDLCALL *c)(void *))\n"
+        "SDL2_PROTO(int,iPhoneSetAnimationCallback,(SDL_Window *a, int b, void (SDLCALL *c)(void *), void *d))\n")
+    # - SetiOSEventPump is listed with the renamed-symbol arguments but the
+    #   plain SDL3_SYM macro. SDL_iPhoneSetEventPump is hand-written, so only
+    #   the SDL3 function needs loading.
+    cb_patch_file("${cannonball_sdl2compat_SOURCE_DIR}/src/sdl3_syms.h"
+        "SDL3_SYM(void,iPhoneSetEventPump,SetiOSEventPump,(bool a),(a),)"
+        "SDL3_SYM(void,SetiOSEventPump,(bool a),(a),)")
+    # - SDL3's SDL_opengl.h is empty on iOS-family targets, but sdl2-compat
+    #   still needs the GL type names for its texture-binding helpers.
+    cb_patch_file("${cannonball_sdl2compat_SOURCE_DIR}/src/sdl2_compat.c"
+        "#include <SDL3/SDL_opengl.h>\n#include <SDL3/SDL_opengl_glext.h>\n"
+        "#ifdef SDL_PLATFORM_IOS /* GL types only; there is no GL on iOS-family targets */\n#undef SDL_PLATFORM_IOS\n#include <SDL3/SDL_opengl.h>\n#include <SDL3/SDL_opengl_glext.h>\n#define SDL_PLATFORM_IOS 1\n#else\n#include <SDL3/SDL_opengl.h>\n#include <SDL3/SDL_opengl_glext.h>\n#endif\n")
+
+    enable_language(OBJC)
+    add_library(cb_sdl2compat STATIC
+        "${cannonball_sdl2compat_SOURCE_DIR}/src/sdl2_compat.c"
+        "${cannonball_sdl2compat_SOURCE_DIR}/src/dynapi/SDL_dynapi.c"
+        # Its src/sdl2_compat_objc.m is macOS-only (Cocoa); use a UIKit version.
+        "${CMAKE_SOURCE_DIR}/platform/visionos/sdl2compat_uikit.m")
+    target_include_directories(cb_sdl2compat
+        PRIVATE   "${cannonball_sdl2compat_SOURCE_DIR}/src"
+        # The SDL2 headers are for the game only; sdl2-compat itself compiles
+        # against the SDL3 headers.
+        INTERFACE "${cannonball_sdl2compat_SOURCE_DIR}/include"
+                  "${cannonball_sdl2compat_SOURCE_DIR}/include/SDL2")
+    target_link_libraries(cb_sdl2compat PRIVATE SDL3::Headers)
+    target_compile_definitions(cb_sdl2compat PRIVATE _REENTRANT "SDL2COMPAT_REVISION=\"release-2.32.74\"")
+    target_compile_options(cb_sdl2compat PRIVATE -w)
+
+    list(APPEND _SDL2_TARGETS cb_sdl2compat)
+    set(_TINYXML2_TARGET tinyxml2::tinyxml2)
 else()
 find_package(SDL2 QUIET CONFIG)
 if(TARGET SDL2::SDL2)
@@ -470,7 +568,7 @@ else()
     pkg_check_modules(TINYXML2 REQUIRED IMPORTED_TARGET tinyxml2)
     set(_TINYXML2_TARGET PkgConfig::TINYXML2)
 endif()
-endif() # CB_IOS
+endif() # CB_IOS / CB_VISIONOS
 
 # ——————————————————————————————————————
 # EGL / OpenGLES2 via pkg-config (Linux, Android, etc)
@@ -485,7 +583,10 @@ target_include_directories(cannonball-dx PRIVATE
 
 option(APPLE_USE_ANGLE "Apple: render through a GLES2 driver (e.g. ANGLE) instead of the OpenGL framework" OFF)
 
-if(CB_IOS)
+if(CB_VISIONOS)
+  # visionOS: no OpenGL ES. The SDL_Renderer backend (sdlr_backend.hpp) draws
+  # with SDL3's Metal renderer.
+elseif(CB_IOS)
   # iOS: the system OpenGL ES 2.0 framework (deprecated by Apple but shipped).
   target_link_libraries(cannonball-dx PRIVATE "-framework OpenGLES")
   target_compile_definitions(cannonball-dx PRIVATE GLES_SILENCE_DEPRECATION)
@@ -530,8 +631,8 @@ target_link_libraries(cannonball-dx PRIVATE
   ${_TINYXML2_TARGET}
   $<$<PLATFORM_ID:Windows>:unofficial::angle::libEGL>
   $<$<PLATFORM_ID:Windows>:unofficial::angle::libGLESv2>
-  $<$<NOT:$<PLATFORM_ID:Windows,Darwin,iOS>>:PkgConfig::EGL>
-  $<$<NOT:$<PLATFORM_ID:Windows,Darwin,iOS>>:PkgConfig::GLESv2>
+  $<$<NOT:$<PLATFORM_ID:Windows,Darwin,iOS,visionOS>>:PkgConfig::EGL>
+  $<$<NOT:$<PLATFORM_ID:Windows,Darwin,iOS,visionOS>>:PkgConfig::GLESv2>
 )
 
 # --- Linux: udev for joystick hotplugging ---
@@ -571,14 +672,16 @@ endif()
 if(MSVC)
     target_compile_options(cannonball-dx PRIVATE /W4)
 else()
-    target_compile_options(cannonball-dx PRIVATE -Wall -Wextra -Wpedantic)
+    # C-family flags only: the visionOS target also compiles Swift.
+    set(CB_C_LANGS "C,CXX,OBJC,OBJCXX")
+    target_compile_options(cannonball-dx PRIVATE "$<$<COMPILE_LANGUAGE:${CB_C_LANGS}>:-Wall;-Wextra;-Wpedantic>")
 
     # Optimize Release builds aggressively (-Ofast) on GCC/Clang
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         target_compile_options(cannonball-dx PRIVATE $<$<CONFIG:Release>:-Ofast>)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         # Clang deprecated -Ofast; this is its documented equivalent.
-        target_compile_options(cannonball-dx PRIVATE "$<$<CONFIG:Release>:-O3;-ffast-math>")
+        target_compile_options(cannonball-dx PRIVATE "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:${CB_C_LANGS}>>:-O3;-ffast-math>")
     endif()
 endif()
 
@@ -590,7 +693,7 @@ endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   # Compile-time flags (Debug only)
   target_compile_options(cannonball-dx PRIVATE
-    $<$<CONFIG:Debug>:-g -O0 -fsanitize=address,undefined -fno-omit-frame-pointer -ftrapv>
+    "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>>:-g;-O0;-fsanitize=address,undefined;-fno-omit-frame-pointer;-ftrapv>"
   )
 
   # Link-time flags (Debug only) — needed for sanitizers
@@ -613,19 +716,11 @@ if(QUIET_BUILD)
         target_compile_options(cannonball-dx PRIVATE /W3 /wd4244 /wd4267 /wd4018 /wd4996)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(cannonball-dx PRIVATE
-            -Wno-unused-parameter
-            -Wno-unused-variable
-            -Wno-missing-field-initializers
-            -Wno-sign-compare
-            -Wno-reorder
-            -Wno-implicit-fallthrough
-            -Wno-format-security)
+            "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-unused-parameter;-Wno-unused-variable;-Wno-missing-field-initializers;-Wno-sign-compare;-Wno-reorder;-Wno-implicit-fallthrough;-Wno-format-security>")
         if(SUPER_QUIET)
             # Nuke all warnings for user-friendly Release-like configs
             target_compile_options(cannonball-dx PRIVATE
-            $<$<CONFIG:Release>:-w>
-            $<$<CONFIG:RelWithDebInfo>:-w>
-            $<$<CONFIG:MinSizeRel>:-w>)
+            "$<$<AND:$<CONFIG:Release,RelWithDebInfo,MinSizeRel>,$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>>:-w>")
         endif()
     endif()
 endif()
@@ -724,7 +819,7 @@ endif()
 
 # OpenMP: Try to enable, but don't require everywhere
 # Apple Clang ships without an OpenMP runtime; pick up Homebrew's libomp if present.
-if(APPLE AND NOT CB_IOS AND NOT OpenMP_ROOT)
+if(APPLE AND NOT CB_APPLE_MOBILE AND NOT OpenMP_ROOT)
   foreach(_omp_prefix /opt/homebrew/opt/libomp /usr/local/opt/libomp)
     if(EXISTS "${_omp_prefix}/include/omp.h")
       set(OpenMP_ROOT "${_omp_prefix}")
@@ -732,8 +827,8 @@ if(APPLE AND NOT CB_IOS AND NOT OpenMP_ROOT)
     endif()
   endforeach()
 endif()
-# iOS has no OpenMP runtime; omp_compat.hpp provides serial fallbacks.
-if(NOT CB_IOS)
+# iOS/visionOS have no OpenMP runtime; omp_compat.hpp provides serial fallbacks.
+if(NOT CB_APPLE_MOBILE)
     find_package(OpenMP)
 endif()
 if(OpenMP_CXX_FOUND)
@@ -785,7 +880,7 @@ endif()
 # linked back into the bundle. See macos_prepare_working_directory() in main.cpp.
 # The data folder name is fixed so renaming the app keeps existing ROMs/config.
 option(MACOS_APP_BUNDLE "Build a macOS .app bundle" ON)
-if(APPLE AND NOT CB_IOS AND MACOS_APP_BUNDLE)
+if(APPLE AND NOT CB_APPLE_MOBILE AND MACOS_APP_BUNDLE)
     file(READ "${main_cpp_base}/globals.hpp" _cb_globals_hpp_mac)
     string(REGEX MATCH "CANNONBALL_DX_VERSION[ \t]+\"([^\"]+)\"" _cb_unused "${_cb_globals_hpp_mac}")
     set(CB_MAC_VERSION "${CMAKE_MATCH_1}")
@@ -840,45 +935,96 @@ if(APPLE AND NOT CB_IOS AND MACOS_APP_BUNDLE)
     endif()
 endif()
 
-# --- iOS app ---------------------------------------------------------------------
+# --- iOS / visionOS app -----------------------------------------------------------
 # Configure with -G Xcode -DCMAKE_SYSTEM_NAME=iOS. The app keeps config and saves
 # in Library/Application Support and reads ROMs from Documents, which the Files
 # app shows (see apple_prepare_working_directory() in main.cpp).
-if(CB_IOS)
+if(CB_APPLE_MOBILE)
     file(READ "${main_cpp_base}/globals.hpp" _cb_globals_hpp_ios)
     string(REGEX MATCH "CANNONBALL_DX_VERSION[ \t]+\"([^\"]+)\"" _cb_unused "${_cb_globals_hpp_ios}")
     set(CB_IOS_VERSION "${CMAKE_MATCH_1}")
     set(CB_IOS_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum iOS version")
+    set(CB_VISIONOS_DEPLOYMENT_TARGET "2.0" CACHE STRING "Minimum visionOS version")
 
-    # App icon: a single 1024x1024 asset-catalog image; Xcode derives the rest.
-    set(_cb_xcassets "${CMAKE_CURRENT_BINARY_DIR}/ios/Assets.xcassets")
-    file(MAKE_DIRECTORY "${_cb_xcassets}/AppIcon.appiconset")
+    # App icon from APPLE_APP_ICON (1024x1024 recommended).
+    set(_cb_xcassets "${CMAKE_CURRENT_BINARY_DIR}/apple/Assets.xcassets")
+    file(REMOVE_RECURSE "${_cb_xcassets}")
+    set(_cb_json_info "\"info\" : { \"author\" : \"xcode\", \"version\" : 1 }")
+    file(WRITE "${_cb_xcassets}/Contents.json" "{ ${_cb_json_info} }\n")
+    if(CB_VISIONOS)
+        # visionOS icons are layered image stacks and need at least two layers
+        # with images: the icon is the back layer, the front layer is
+        # transparent, and the middle layer is empty.
+        set(_cb_icon_png "${_cb_xcassets}/AppIcon.solidimagestack/Back.solidimagestacklayer/Content.imageset/AppIcon-1024.png")
+        file(WRITE "${_cb_xcassets}/AppIcon.solidimagestack/Contents.json"
+            "{ ${_cb_json_info}, \"layers\" : [ { \"filename\" : \"Front.solidimagestacklayer\" }, { \"filename\" : \"Middle.solidimagestacklayer\" }, { \"filename\" : \"Back.solidimagestacklayer\" } ] }\n")
+        foreach(_cb_layer Front Middle Back)
+            set(_cb_layer_dir "${_cb_xcassets}/AppIcon.solidimagestack/${_cb_layer}.solidimagestacklayer")
+            file(WRITE "${_cb_layer_dir}/Contents.json" "{ ${_cb_json_info} }\n")
+            if(_cb_layer STREQUAL "Back")
+                set(_cb_image "\"filename\" : \"AppIcon-1024.png\", ")
+            elseif(_cb_layer STREQUAL "Front")
+                file(COPY "${CMAKE_SOURCE_DIR}/platform/visionos/icon-transparent-layer.png"
+                     DESTINATION "${_cb_layer_dir}/Content.imageset")
+                set(_cb_image "\"filename\" : \"icon-transparent-layer.png\", ")
+            else()
+                set(_cb_image "")
+            endif()
+            file(WRITE "${_cb_layer_dir}/Content.imageset/Contents.json"
+                "{ \"images\" : [ { ${_cb_image}\"idiom\" : \"vision\", \"scale\" : \"2x\" } ], ${_cb_json_info} }\n")
+        endforeach()
+    else()
+        # A single 1024x1024 image; Xcode derives the other sizes.
+        set(_cb_icon_png "${_cb_xcassets}/AppIcon.appiconset/AppIcon-1024.png")
+        file(WRITE "${_cb_xcassets}/AppIcon.appiconset/Contents.json"
+            "{ \"images\" : [ { \"filename\" : \"AppIcon-1024.png\", \"idiom\" : \"universal\", \"platform\" : \"ios\", \"size\" : \"1024x1024\" } ], ${_cb_json_info} }\n")
+    endif()
     execute_process(
-        COMMAND sips -s format png -z 1024 1024 "${APPLE_APP_ICON}"
-                --out "${_cb_xcassets}/AppIcon.appiconset/AppIcon-1024.png"
+        COMMAND sips -s format png -z 1024 1024 "${APPLE_APP_ICON}" --out "${_cb_icon_png}"
         OUTPUT_QUIET RESULT_VARIABLE _cb_sips_rc)
     if(NOT _cb_sips_rc EQUAL 0)
         message(FATAL_ERROR "Could not convert ${APPLE_APP_ICON} to a 1024x1024 PNG")
     endif()
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${APPLE_APP_ICON}")
-    file(WRITE "${_cb_xcassets}/Contents.json"
-        "{ \"info\" : { \"author\" : \"xcode\", \"version\" : 1 } }\n")
-    file(WRITE "${_cb_xcassets}/AppIcon.appiconset/Contents.json" [=[
-{
-  "images" : [
-    { "filename" : "AppIcon-1024.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" }
-  ],
-  "info" : { "author" : "xcode", "version" : 1 }
-}
-]=])
     # Game resources go in the bundle root (iOS bundles are flat). Listing them
     # as resources lets Xcode's Copy Bundle Resources phase copy and sign them;
     # res/ is added as a folder reference so its layout is kept.
-    # UIScene lifecycle adoption for SDL2 (required on iOS 27+).
     enable_language(OBJCXX)
-    target_sources(cannonball-dx PRIVATE "${CMAKE_SOURCE_DIR}/platform/ios/ios_scene.mm")
-    set_source_files_properties("${CMAKE_SOURCE_DIR}/platform/ios/ios_scene.mm"
-        PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    if(CB_VISIONOS)
+        # main() for sdl2-compat, the window-shape helper, and the embedded
+        # SDL3 framework that sdl2-compat loads at runtime.
+        enable_language(Swift)
+        set(_cb_platform_sources
+            "${CMAKE_SOURCE_DIR}/platform/visionos/uikit_main.c"
+            "${CMAKE_SOURCE_DIR}/platform/visionos/visionos_window.mm"
+            # Stereoscopic depth layers (3D DEPTH setting).
+            "${CMAKE_SOURCE_DIR}/platform/visionos/StereoOverlay.swift")
+        set(_cb_info_plist "${CMAKE_SOURCE_DIR}/platform/visionos/Info.plist.in")
+        add_dependencies(cannonball-dx SDL3-shared)
+        set_target_properties(cannonball-dx PROPERTIES
+            XCODE_EMBED_FRAMEWORKS SDL3-shared
+            XCODE_EMBED_FRAMEWORKS_CODE_SIGN_ON_COPY ON
+            XCODE_EMBED_FRAMEWORKS_REMOVE_HEADERS_ON_COPY ON
+            XCODE_ATTRIBUTE_XROS_DEPLOYMENT_TARGET "${CB_VISIONOS_DEPLOYMENT_TARGET}"
+            XCODE_ATTRIBUTE_SWIFT_VERSION "5.0"
+            # CMake bakes in the Swift library path of the configure-time SDK
+            # (the device SDK); resolve it per build so simulator builds link.
+            XCODE_ATTRIBUTE_LIBRARY_SEARCH_PATHS "$(SDKROOT)/usr/lib/swift $(inherited)"
+            XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "7")
+    else()
+        # UIScene lifecycle adoption for SDL2 (required on iOS 27+).
+        set(_cb_platform_sources "${CMAKE_SOURCE_DIR}/platform/ios/ios_scene.mm")
+        set(_cb_info_plist "${CMAKE_SOURCE_DIR}/platform/ios/Info.plist.in")
+        set_target_properties(cannonball-dx PROPERTIES
+            XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "${CB_IOS_DEPLOYMENT_TARGET}"
+            XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2")
+    endif()
+    target_sources(cannonball-dx PRIVATE ${_cb_platform_sources})
+    foreach(_cb_src ${_cb_platform_sources})
+        if(_cb_src MATCHES "\\.mm$")
+            set_source_files_properties("${_cb_src}" PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+        endif()
+    endforeach()
     target_link_libraries(cannonball-dx PRIVATE "-framework UIKit")
 
     set(_cb_ios_resources
@@ -891,14 +1037,12 @@ if(CB_IOS)
         MACOSX_BUNDLE TRUE
         OUTPUT_NAME "${APPLE_APP_NAME}"
         RESOURCE "${_cb_ios_resources}"
-        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/platform/ios/Info.plist.in"
+        MACOSX_BUNDLE_INFO_PLIST "${_cb_info_plist}"
         MACOSX_BUNDLE_BUNDLE_NAME "${APPLE_APP_NAME}"
         MACOSX_BUNDLE_GUI_IDENTIFIER "${APPLE_BUNDLE_ID}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${CB_IOS_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${CB_IOS_VERSION}"
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${APPLE_BUNDLE_ID}"
-        XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "${CB_IOS_DEPLOYMENT_TARGET}"
-        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
         XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
         XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
         XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${APPLE_DEVELOPMENT_TEAM}")

@@ -47,6 +47,8 @@ public:
     void mark_display_dirty() { display_dirty.store(true, std::memory_order_release); }
     bool start_frame() {return true;};
     bool finalize_frame();
+    // visionOS stereo: hand the previous frame's depth layers to the overlay.
+    void present_stereo_layers();
     void draw_frame(uint16_t* pixels, int fastpass);
 
 protected:

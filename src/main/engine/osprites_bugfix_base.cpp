@@ -1158,6 +1158,8 @@ void OSprites::move_sprite(oentry* sprite, uint8_t shift)
         value >>= 1;
     else if (config.tick_fps == 120)
         value >>= 2;
+    else if (config.tick_fps == 90)
+        value /= 3;
 
     sprite->z += value;
 }

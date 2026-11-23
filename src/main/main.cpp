@@ -18,12 +18,11 @@
 
 // SDL Library
 #include <SDL.h>
-#ifdef __APPLE__
-#include <TargetConditionals.h>
-#endif
+#include "apple_platform.hpp"
 
 // SDL Specific Code
 #include "sdl2/timer.hpp"
+#include "sdl2/gl_backend.hpp"   // glb::get_swap_interval
 #include "sdl2/input.hpp"
 #include "sdl2/display_utils.hpp"
 
@@ -254,8 +253,8 @@ static void show_rom_load_error()
         "- A suitable MAME outrun.zip (a current merged set is recommended)\n"
         "- Traditional extracted CannonBall / OutRun Revision B ROM files\n\n"
         "Optional early/Japanese program ROMs and corrected PCM ROM data are also supported when present.\n\n"
-#if defined(__APPLE__) && TARGET_OS_IPHONE
-        "Add outrun.zip to this app's folder in the Files app (On My iPhone / On My iPad), then reopen the app. "
+#if CB_APPLE_MOBILE
+        "Add outrun.zip to this app's folder in the Files app (On My iPhone, iPad or Apple Vision Pro), then reopen the app. "
         "See roms.txt there for details. Please use ROM data you legally own.";
 #else
         "See roms/roms.txt for details. Please use ROM data you legally own.";
@@ -330,7 +329,7 @@ static void process_events(void)
 
             case SDL_CONTROLLERBUTTONDOWN:
                 input.handle_controller_down(&event.cbutton);
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if CB_APPLE_MOBILE
                 // iOS reserves the Home/PS/Guide button (the default Menu
                 // Access), so Select/Create/Back opens the menu as well.
                 if (event.cbutton.button == SDL_CONTROLLER_BUTTON_BACK)
@@ -340,13 +339,13 @@ static void process_events(void)
 
             case SDL_CONTROLLERBUTTONUP:
                 input.handle_controller_up(&event.cbutton);
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if CB_APPLE_MOBILE
                 if (event.cbutton.button == SDL_CONTROLLER_BUTTON_BACK)
                     input.set_menu_request(false);
 #endif
                 break;
 
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if CB_APPLE_MOBILE
             // No touch controls yet: tapping the screen opens the menu.
             case SDL_FINGERDOWN:
                 input.set_menu_request(true);
@@ -727,14 +726,14 @@ static int main_loop() {
         cannonball::fps_lock == 30  ? 30  :
         cannonball::fps_lock == 60  ? 60  :
         cannonball::fps_lock == 120 ? 120 :
-        (config.video.fps == 0 ? 30 : (config.video.fps == 3 ? 120 : 60));
-    config.video.fps = configured_fps == 30 ? 0 : (configured_fps == 120 ? 3 : 2);
+        Config::fps_from_setting(config.video.fps);
+    config.video.fps = Config::setting_from_fps(configured_fps);
     config.set_fps(config.video.fps);
     double targetFPS = static_cast<double>(configured_fps);
 
     auto refresh_vsync_state = [&]()
     {
-        if (config.video.vsync != 1 || SDL_GL_GetSwapInterval() == 0)
+        if (config.video.vsync != 1 || glb::get_swap_interval() == 0)
             return false;
 
         SDL_DisplayMode displayMode;
@@ -1138,7 +1137,7 @@ int main(int argc, char* argv[]) {
 #ifdef __APPLE__
     apple_prepare_working_directory();
 #endif
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if CB_IOS
     // The game image is landscape-only.
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 #endif

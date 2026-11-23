@@ -8,9 +8,7 @@
 
 // Pre-include the base file's dependencies before the temporary method-name
 // macros below. This keeps the macros away from standard-library headers.
-#ifdef __APPLE__
-#include <TargetConditionals.h>
-#endif
+#include "apple_platform.hpp"
 #include <iostream>
 #include <fstream>
 #include <iterator>
@@ -632,12 +630,16 @@ void Config::load()
     // any outdated resource config that may still be present in a build folder.
     if (first_run)
     {
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if CB_IOS
         video.widescreen = video_settings_t::ASPECT_FULL; // fill the device's screen
 #else
         video.widescreen = 0;
 #endif
+#if CB_VISIONOS
+        video.fps = 4;   // 90 FPS, the Vision Pro refresh rate
+#else
         video.fps = 2;
+#endif
         video.shader_mode = 0;
         video.shadow_mask = 0;
         video.maskDim = 100;

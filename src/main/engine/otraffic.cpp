@@ -368,7 +368,7 @@ void OTraffic::move_spawned_sprite(oentry* sprite)
         if (((oinitengine.route_selected ^ sprite->control) & OSprites::TRAFFIC_RHS) == 0) {
             // JJP Ghost car fix.
             // Tag this as a potentially problematic sprite.
-            sprite->hidden = config.fps == 120 ? 8 : (config.fps == 60 ? 4 : 2);
+            sprite->hidden = config.fps / 15;   // 2 frames per 30 Hz tick
             return;
         }
     } else {
@@ -462,10 +462,7 @@ void OTraffic::update_props(oentry* sprite)
 {
     int32_t z_adjust = (((oinitengine.car_increment >> 16) - sprite->traffic_speed) * (sprite->z >> 16)) << 5;
 
-    if (config.tick_fps == 60)
-        z_adjust >>= 1;
-    else if (config.tick_fps == 120)
-        z_adjust >>= 2;
+    z_adjust = config.fps_per_frame(z_adjust);
 
     sprite->z += z_adjust;
     

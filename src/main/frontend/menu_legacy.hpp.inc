@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "apple_platform.hpp"
 #include <algorithm>
 #include <vector>
 #include <string>
@@ -202,7 +203,7 @@ public:
             menu_main.push_back(ENTRY_PLAYGAME);
             menu_main.push_back(ENTRY_SETTINGS);
             menu_main.push_back(ENTRY_ABOUT);
-#if !(defined(__APPLE__) && TARGET_OS_IPHONE)
+#if !CB_APPLE_MOBILE
             menu_main.push_back(ENTRY_EXIT);   // iOS apps are closed from the app switcher
 #endif
 
@@ -220,6 +221,9 @@ public:
             menu_video.clear();
             menu_video.push_back(ENTRY_FULLSCREEN);
             menu_video.push_back(ENTRY_WIDESCREEN);
+#if CB_VISIONOS
+            menu_video.push_back(stereo_depth_entry());
+#endif
             menu_video.push_back(ENTRY_HIRES);
             menu_video.push_back(ENTRY_FRAME_RATE);
             menu_video.push_back(ENTRY_VSYNC);
@@ -607,6 +611,17 @@ protected:
         }
     }
 
+#if CB_VISIONOS
+    // visionOS stereoscopic depth (see stereo_layers.hpp).
+    static constexpr const char* STEREO_DEPTH_LABEL = "3D DEPTH ";
+    static std::string stereo_depth_entry()
+    {
+        static const char* names[4] = { "OFF", "LOW", "MEDIUM", "HIGH" };
+        const int level = std::clamp(config.video.stereo_depth, 0, 3);
+        return std::string(STEREO_DEPTH_LABEL) + names[level];
+    }
+#endif
+
     static int wrap_value(int value, int minimum, int maximum, int step, int direction)
     {
         value += step * direction;
@@ -746,17 +761,9 @@ protected:
             else if (selected(ENTRY_FRAME_RATE))
             {
                 handled = true;
-                const int current =
-                    config.video.fps == 0 ? 30 :
-                    config.video.fps == 3 ? 120 : 60;
-                int next = current;
-
-                if (direction > 0)
-                    next = current == 30 ? 60 : (current == 60 ? 120 : 30);
-                else
-                    next = current == 30 ? 120 : (current == 120 ? 60 : 30);
-
-                const int encoded = next == 30 ? 0 : (next == 120 ? 3 : 2);
+                const int current = Config::fps_from_setting(config.video.fps);
+                const int next = Config::next_frame_rate(current, direction);
+                const int encoded = Config::setting_from_fps(next);
                 if (encoded != config.video.fps)
                 {
                     config.video.fps = encoded;
@@ -766,6 +773,19 @@ protected:
                     changed = true;
                 }
             }
+#if CB_VISIONOS
+            else if (option.rfind(STEREO_DEPTH_LABEL, 0) == 0)
+            {
+                handled = true;
+                const int next = wrap_value(config.video.stereo_depth, 0, 3, 1, direction);
+                if (next != config.video.stereo_depth)
+                {
+                    config.video.stereo_depth = next;
+                    changed = true;
+                }
+                menu_selected->at(cursor) = stereo_depth_entry();
+            }
+#endif
             else if (selected(ENTRY_VSYNC))
             {
                 handled = true;

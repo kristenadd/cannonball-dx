@@ -25,9 +25,7 @@
 #include "frontend/ttrial.hpp"
 
 #include <iostream>
-#ifdef __APPLE__
-#include <TargetConditionals.h>
-#endif
+#include "apple_platform.hpp"
 
 #include "directx/ffeedback.hpp"
 
@@ -155,7 +153,7 @@ void Menu::populate_for_pc()
     menu_main.push_back(ENTRY_GAMEMODES);
     menu_main.push_back(ENTRY_SETTINGS);
     menu_main.push_back(ENTRY_ABOUT);
-#if !(defined(__APPLE__) && TARGET_OS_IPHONE)
+#if !CB_APPLE_MOBILE
     menu_main.push_back(ENTRY_EXIT);   // iOS apps are closed from the app switcher
 #endif
 
@@ -462,8 +460,7 @@ void Menu::tick_ui()
     // At 120 FPS keep that simulation on the established 60 Hz cadence so
     // road speed, acceleration, horizon movement and granular scrolling keep
     // exactly the same real-time behaviour as the existing 60 FPS mode.
-    const bool frontend_road_tick =
-        config.fps != 120 || ((frame & 1) == 0);
+    const bool frontend_road_tick = config.vblank_60hz_frame(frame);
 
     if (frontend_road_tick)
     {
@@ -501,9 +498,7 @@ void Menu::tick_ui()
     }
 
     // Do Animations at 30 fps
-    if (config.fps == 30 ||
-        (config.fps == 60 && (frame & 1) == 0) ||
-        (config.fps == 120 && (frame & 3) == 0))
+    if (config.tick_30hz_frame(frame))
     {
         ologo.tick();
         osprites.sprite_copy();
@@ -792,8 +787,8 @@ void Menu::tick_menu()
             }
             else if (SELECTED(ENTRY_FRAME_RATE))
             {
-                config.video.fps = config.video.fps == 0 ? 2 :
-                                   config.video.fps == 2 ? 3 : 0;
+                config.video.fps = Config::setting_from_fps(
+                    Config::next_frame_rate(Config::fps_from_setting(config.video.fps), 1));
                 config.set_fps(config.video.fps);
             }
             else if (SELECTED(ENTRY_VSYNC))
@@ -1440,7 +1435,7 @@ void Menu::refresh_menu()
         else if (menu_selected == &menu_video)
         {
             if (SELECTED(ENTRY_FPS_COUNTER))        set_menu_text(ENTRY_FPS_COUNTER, config.video.fps_count ? "ON" : "OFF");
-            else if (SELECTED(ENTRY_FRAME_RATE))    set_menu_text(ENTRY_FRAME_RATE, config.video.fps == 0 ? "30 FPS" : (config.video.fps == 3 ? "120 FPS" : "60 FPS"));
+            else if (SELECTED(ENTRY_FRAME_RATE))    set_menu_text(ENTRY_FRAME_RATE, std::to_string(Config::fps_from_setting(config.video.fps)) + " FPS");
             else if (SELECTED(ENTRY_VSYNC))         set_menu_text(ENTRY_VSYNC, config.video.vsync ? "ON" : "OFF");
             else if (SELECTED(ENTRY_FULLSCREEN))    set_menu_text(ENTRY_FULLSCREEN, VIDEO_LABELS[config.video.mode]);
             else if (SELECTED(ENTRY_WIDESCREEN))    set_menu_text(ENTRY_WIDESCREEN, ASPECT_LABELS[config.video.widescreen]);

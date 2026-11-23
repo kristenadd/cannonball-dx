@@ -7,7 +7,6 @@
 #include "hqx.h"
 
 #include <SDL.h>
-#include "sdl2/gl_platform.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -350,6 +349,7 @@ public:
             (config.video.crt_shape != 0) ||
             (config.video.shadow_mask == 1));
         glb::present();
+        present_stereo_layers();
 
         activity_counter.fetch_sub(1, std::memory_order_acq_rel);
         std::unique_lock<std::mutex> lock(mtx);
@@ -615,29 +615,7 @@ private:
         glb::State::PixFmt fmt)
     {
         glb::set_game_pixel_format(fmt);
-        glb::G.gameW = width;
-        glb::G.gameH = height;
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, glb::G.texGame);
-
-        const bool rgb555 = fmt == glb::State::PixFmt::RGB555;
-        const GLenum internal_format = rgb555 ? CB_GL_RGB5_A1_INTERNAL : GL_RGBA;
-        const GLenum external_format = GL_RGBA;
-        const GLenum type = rgb555
-            ? GL_UNSIGNED_SHORT_5_5_5_1
-            : GL_UNSIGNED_BYTE;
-
-        glTexImage2D(
-            GL_TEXTURE_2D,
-            0,
-            internal_format,
-            width,
-            height,
-            0,
-            external_format,
-            type,
-            nullptr);
+        glb::reallocate_game_texture(width, height);
     }
 
     void configure_se_shader_if_needed()

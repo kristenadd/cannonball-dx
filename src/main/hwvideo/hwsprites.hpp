@@ -25,6 +25,10 @@ public:
     void write(const uint16_t adr, const uint16_t data);
     void render(uint16_t* pixels, const uint8_t);
 
+    // Stereo: when set, each sprite is drawn into depth_layers[bucket] (chosen
+    // from its zoom, see stereo_layers.hpp) instead of the frame buffer.
+    uint16_t** depth_layers = nullptr;
+
     std::chrono::nanoseconds setup{}; //initialises to zero
     std::chrono::nanoseconds draw[16]{};
 

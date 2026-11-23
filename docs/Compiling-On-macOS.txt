@@ -63,6 +63,7 @@ root and set any of:
     set(APPLE_BUNDLE_ID "com.example.MyRacer")
 
 apple-overrides.cmake is git-ignored, so local branding never gets committed.
+CI release builds keep the default name and icon (docs/Apple-Release-Builds.txt).
 The next build picks up changes automatically. The data folder stays
 ~/Library/Application Support/CannonBall DX whatever the app is called.
 

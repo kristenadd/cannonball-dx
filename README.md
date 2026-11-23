@@ -434,6 +434,10 @@ cmake -S . -B build-visionos -G Xcode -DCMAKE_SYSTEM_NAME=visionOS -DCMAKE_OSX_D
 
 Open `build-visionos/cannonball-dx.xcodeproj` in Xcode and run it. See `docs/Compiling-On-visionOS.txt`.
 
+### Signed Apple builds
+
+GitHub Actions builds a notarized Mac app and ad-hoc iPhone/iPad and Apple Vision Pro apps on every push to `master`, and sends the iPhone/iPad build to Firebase App Distribution testers. See `docs/Apple-Release-Builds.txt`.
+
 ### Linux (Untested)
 
 > **CannonBall DX is not tested on Linux.** The following build path is inherited from the upstream project and is retained for convenience only. It should not be interpreted as an official CannonBall DX compatibility statement.

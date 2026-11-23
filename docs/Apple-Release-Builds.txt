@@ -1,0 +1,45 @@
+Signed Apple builds (GitHub Actions)
+====================================
+
+.github/workflows/apple-builds.yml builds, signs and distributes the Apple apps
+on every push to master, on a pushed v* tag, and by hand (Actions > Apple
+builds > Run workflow):
+
+- Mac app: Developer ID signed with the hardened runtime, notarized and
+  stapled; a .zip that opens on any Apple silicon Mac without warnings. The
+  bundled Homebrew libraries come from the runner (macOS 26), so the CI build
+  needs macOS 26 or later.
+- iPhone / iPad: an ad-hoc .ipa, uploaded to Firebase App Distribution.
+- Apple Vision Pro: an ad-hoc .ipa (Firebase App Distribution has no visionOS
+  install flow; install it with Apple Configurator or
+  "xcrun devicectl device install app").
+
+Each run keeps all three as workflow artifacts; a v* tag also attaches them to
+a GitHub release. The ad-hoc builds install on the devices registered with the
+Apple developer team when they were built. The builds contain no ROMs.
+
+Secrets and variables
+---------------------
+The workflow's header lists every secret and variable it reads. They follow
+the owner's SigningSecrets tool (signing certificates, App Store Connect API
+key, Firebase service account), which sets them from the login keychain.
+
+Firebase App Distribution
+-------------------------
+Firebase project: outrun-cannonball-dx (console.firebase.google.com). Each
+build is uploaded there. To invite testers automatically:
+
+1. Firebase console > App Distribution > Testers & Groups: add testers to a
+   group.
+2. Set the repository variable FIREBASE_GROUPS to the group's alias (or
+   several, comma-separated). A manual run can name groups instead.
+
+Testers open the email invite on their iPhone or iPad, which registers its
+UDID with Firebase; the next run copies new UDIDs to the Apple developer
+account (fastlane sync_devices) so that build installs on them.
+
+Branding
+--------
+Release builds use the default CannonBall DX name and icon. A local
+apple-overrides.cmake (git-ignored) only affects local builds; CI sets just
+the signing team and the bundle ID (.github/scripts/apple-overrides.sh).

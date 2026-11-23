@@ -1,0 +1,370 @@
+# Signed Apple builds: the Mac app (Developer ID, notarized, stapled), an ad-hoc iPhone/iPad
+# .ipa (uploaded to Firebase App Distribution) and an ad-hoc Apple Vision Pro .ipa.
+#
+# Runs on every push to master, by hand (Actions ▸ Apple builds ▸ Run workflow), and on a
+# pushed tag v*, which also attaches all three to a GitHub release. The builds contain no ROMs
+# and use the default CannonBall DX name and icon (local apple-overrides.cmake isn't used).
+#
+# Secrets (Settings ▸ Secrets and variables ▸ Actions). The names are the same as in
+# outrun2-decomp, PairMagic and SimulatorManager; ~/Projects/SigningSecrets exports them from
+# the login keychain and sets them (repos.conf line kristenadd/cannonball-dx).
+#   DEVELOPER_ID_P12_BASE64           "Developer ID Application" certificate + key, .p12, base64
+#   DEVELOPER_ID_P12_PASSWORD
+#   APPLE_DEVELOPMENT_P12_BASE64      "Apple Development" certificate + key (the archives)
+#   APPLE_DEVELOPMENT_P12_PASSWORD
+#   APPLE_DISTRIBUTION_P12_BASE64     "Apple Distribution" certificate + key (the ad-hoc exports)
+#   APPLE_DISTRIBUTION_P12_PASSWORD
+#   NOTARY_API_KEY_P8                 App Store Connect API key: the .p8 file's text, its key ID
+#   NOTARY_API_KEY_ID                 and issuer ID. Notarizes the Mac app; the iOS and visionOS
+#   NOTARY_API_ISSUER_ID              jobs sign in with it to make the provisioning profiles and
+#                                     register devices.
+#   NOTARY_APPLE_ID                   instead of the API key, for the Mac notarization only:
+#   NOTARY_APP_PASSWORD               an Apple ID and an app-specific password
+#   FIREBASE_SERVICE_ACCOUNT_JSON     Firebase service account key, "Firebase App Distribution Admin"
+# Variables:
+#   IOS_BUNDLE_ID                     the app's bundle id (registered for the team), iOS and visionOS
+#   FIREBASE_PROJECT_NUMBER           Firebase console ▸ Project settings ▸ General
+#   FIREBASE_IOS_APP_ID               the iOS app's App ID there (1:…:ios:…)
+#   FIREBASE_GROUPS                   optional: tester group aliases invited on every automatic build
+#                                     (comma-separated). Without it, builds are uploaded but only
+#                                     listed in the Firebase console.
+#   XCODE_VERSION                     optional, e.g. 26.2 (default: the newest Xcode on the runner)
+#
+# The ad-hoc profiles hold every device registered for the team at build time. Firebase testers
+# register their iPhone / iPad by opening the Firebase invite on it; the next run copies those
+# UDIDs to Apple (fastlane sync_devices). Apple allows 100 devices of each kind per membership year.
+
+name: Apple builds
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+    paths-ignore: ['**.md', 'docs/**', '.github/workflows/linux-build.yml', '.github/workflows/windows-build.yml']
+  workflow_dispatch:
+    inputs:
+      mac:
+        description: Build the Mac app
+        type: boolean
+        default: true
+      visionos:
+        description: Build the Apple Vision Pro app
+        type: boolean
+        default: true
+      sync_devices:
+        description: Register the Firebase testers' devices with Apple first
+        type: boolean
+        default: true
+      firebase_groups:
+        description: Firebase tester groups to invite (comma-separated; empty = the FIREBASE_GROUPS variable)
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apple-builds-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  APPLE_TEAM_ID: B4H429V95D
+  NOTARY_PROFILE: CannonBallDX-Notary
+  BUILD_NUMBER: ${{ github.run_number }}
+
+jobs:
+  mac:
+    name: Mac app (notarized)
+    if: github.event_name != 'workflow_dispatch' || inputs.mac
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          if [ -n "${{ vars.XCODE_VERSION }}" ]; then xcode="/Applications/Xcode_${{ vars.XCODE_VERSION }}.app"
+          else xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1); fi
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: Signing team and bundle ID
+        env:
+          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+        run: bash .github/scripts/apple-overrides.sh
+
+      - name: Install dependencies
+        run: brew install ninja pkgconf sdl2 tinyxml2 mpg123 libomp
+
+      - name: Build
+        run: |
+          cmake -S . -B build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release -DWITH_MARCH_NATIVE=OFF \
+            -DAPPLE_OVERRIDES_FILE="$APPLE_OVERRIDES_FILE"
+          cmake --build build-macos
+          app=$(ls -d build-macos/*.app | head -1)
+          echo "APP=$app" >> "$GITHUB_ENV"
+          name=$(basename "$app" .app)
+          echo "DIST_NAME=${name// /-}" >> "$GITHUB_ENV"
+
+      - name: Install the signing certificate
+        env:
+          P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          [ -n "$P12_BASE64" ] || { echo "::error::The DEVELOPER_ID_P12_BASE64 secret isn't set"; exit 1; }
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          keychain_password=$(openssl rand -base64 24)
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+
+          printf '%s' "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$P12_PASSWORD" -f pkcs12 \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -P "$RUNNER_TEMP/cert.p12"
+          # Apple's Developer ID intermediate, so codesign can build the full chain (a .p12 that
+          # already includes it makes this import report a duplicate).
+          curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$RUNNER_TEMP/DeveloperIDG2CA.cer"
+          if ! output=$(security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain" 2>&1); then
+            [[ "$output" == *"already exists"* ]] || { echo "$output"; exit 1; }
+          fi
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain"
+          echo "KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Save the notarization credentials
+        env:
+          API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+          API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+          APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          APP_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
+        run: |
+          if [ -n "$API_KEY_P8" ]; then
+            printf '%s\n' "$API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+            xcrun notarytool store-credentials "$NOTARY_PROFILE" --keychain "$KEYCHAIN" \
+              --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$API_KEY_ID" --issuer "$API_ISSUER_ID"
+            rm -P "$RUNNER_TEMP/AuthKey.p8"
+          elif [ -n "$APPLE_ID" ]; then
+            xcrun notarytool store-credentials "$NOTARY_PROFILE" --keychain "$KEYCHAIN" \
+              --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APP_PASSWORD"
+          else
+            echo "::error::Set either the NOTARY_API_KEY_* secrets or NOTARY_APPLE_ID and NOTARY_APP_PASSWORD"
+            exit 1
+          fi
+
+      - name: Sign
+        run: |
+          # The temporary keychain holds just the one Developer ID identity.
+          identity="Developer ID Application"
+          # The bundled Homebrew libraries first (inside out), then the app; hardened runtime
+          # and a secure timestamp are what notarization requires.
+          for lib in "$APP"/Contents/Frameworks/*.dylib; do
+            [ -e "$lib" ] || continue
+            codesign --force --options runtime --timestamp --sign "$identity" --keychain "$KEYCHAIN" "$lib"
+          done
+          codesign --force --options runtime --timestamp --sign "$identity" --keychain "$KEYCHAIN" "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+      - name: Notarize and staple
+        run: |
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --wait \
+            --keychain-profile "$NOTARY_PROFILE" --keychain "$KEYCHAIN" \
+            --output-format json | tee "$RUNNER_TEMP/notary.json"
+          grep -q '"status" *: *"Accepted"' "$RUNNER_TEMP/notary.json" || {
+            id=$(sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p' "$RUNNER_TEMP/notary.json" | head -1)
+            xcrun notarytool log "$id" --keychain-profile "$NOTARY_PROFILE" --keychain "$KEYCHAIN" || true
+            exit 1; }
+          xcrun stapler staple "$APP"
+          spctl --assess --type execute --verbose=2 "$APP"
+          mkdir -p dist
+          ditto -c -k --keepParent "$APP" "dist/$DIST_NAME-mac.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-app
+          path: dist/*-mac.zip
+
+      - name: Remove the keychain
+        if: always()
+        run: |
+          [ -n "${KEYCHAIN:-}" ] && security delete-keychain "$KEYCHAIN" || true
+
+  mobile:
+    name: ${{ matrix.title }} ad-hoc .ipa
+    strategy:
+      fail-fast: false
+      matrix:
+        # iPhone/iPad always; Apple Vision Pro unless a manual run turned it off.
+        include: ${{ fromJSON(format('[{0}{1}]',
+          '{"platform":"iOS","title":"iPhone/iPad","suffix":"ios"}',
+          (github.event_name != 'workflow_dispatch' || inputs.visionos)
+            && ',{"platform":"visionOS","title":"Apple Vision Pro","suffix":"visionos"}' || '')) }}
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          if [ -n "${{ vars.XCODE_VERSION }}" ]; then xcode="/Applications/Xcode_${{ vars.XCODE_VERSION }}.app"
+          else xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1); fi
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+          # The visionOS platform is an optional Xcode component; fetch it if the image lacks it.
+          if [ "${{ matrix.platform }}" = visionOS ] && ! xcodebuild -showsdks | grep -q xros; then
+            xcodebuild -downloadPlatform visionOS
+          fi
+
+      - name: Check secrets
+        env:
+          KEY: ${{ secrets.NOTARY_API_KEY_P8 }}
+          DEV: ${{ secrets.APPLE_DEVELOPMENT_P12_BASE64 }}
+          DIST: ${{ secrets.APPLE_DISTRIBUTION_P12_BASE64 }}
+          BUNDLE: ${{ vars.IOS_BUNDLE_ID }}
+        run: |
+          for v in KEY:NOTARY_API_KEY_P8 DEV:APPLE_DEVELOPMENT_P12_BASE64 DIST:APPLE_DISTRIBUTION_P12_BASE64 BUNDLE:IOS_BUNDLE_ID; do
+            eval "[ -n \"\$${v%%:*}\" ]" || { echo "::error::${v#*:} isn't set (see the comment at the top of this workflow)"; exit 1; }
+          done
+
+      - name: Signing team and bundle ID
+        env:
+          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+        run: bash .github/scripts/apple-overrides.sh
+
+      - name: Install the signing certificates and the API key
+        env:
+          DEV_P12: ${{ secrets.APPLE_DEVELOPMENT_P12_BASE64 }}
+          DEV_PASSWORD: ${{ secrets.APPLE_DEVELOPMENT_P12_PASSWORD }}
+          DIST_P12: ${{ secrets.APPLE_DISTRIBUTION_P12_BASE64 }}
+          DIST_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_P12_PASSWORD }}
+          API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+        run: |
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          keychain_password=$(openssl rand -base64 24)
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          for pair in "DEV_P12:DEV_PASSWORD" "DIST_P12:DIST_PASSWORD"; do
+            eval "data=\$${pair%%:*}; password=\$${pair#*:}"
+            printf '%s' "$data" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$password" -f pkcs12 \
+              -T /usr/bin/codesign -T /usr/bin/security
+            rm -P "$RUNNER_TEMP/cert.p12"
+          done
+          # Apple's WWDR intermediate (G3) for the development / distribution chain.
+          curl -fsSL https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer -o "$RUNNER_TEMP/AppleWWDRCAG3.cer"
+          if ! output=$(security import "$RUNNER_TEMP/AppleWWDRCAG3.cer" -k "$keychain" 2>&1); then
+            [[ "$output" == *"already exists"* ]] || { echo "$output"; exit 1; }
+          fi
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain"
+          echo "KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          printf '%s\n' "$API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Set up fastlane
+        if: matrix.platform == 'iOS' && vars.FIREBASE_PROJECT_NUMBER != ''
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - name: Register the Firebase testers' devices
+        if: matrix.platform == 'iOS' && vars.FIREBASE_PROJECT_NUMBER != '' && (github.event_name != 'workflow_dispatch' || inputs.sync_devices)
+        env:
+          FIREBASE_PROJECT_NUMBER: ${{ vars.FIREBASE_PROJECT_NUMBER }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+        run: bundle exec fastlane ios sync_devices
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-${{ matrix.suffix }} -G Xcode -DCMAKE_SYSTEM_NAME=${{ matrix.platform }} \
+            -DAPPLE_OVERRIDES_FILE="$APPLE_OVERRIDES_FILE" -DCB_BUILD_NUMBER="$BUILD_NUMBER"
+
+      - name: Archive
+        run: |
+          xcodebuild -project build-${{ matrix.suffix }}/cannonball-dx.xcodeproj -scheme cannonball-dx \
+            -configuration Release -destination "generic/platform=${{ matrix.platform }}" \
+            -archivePath "$RUNNER_TEMP/app.xcarchive" -derivedDataPath "$RUNNER_TEMP/dd" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "${{ secrets.NOTARY_API_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.NOTARY_API_ISSUER_ID }}" \
+            archive
+          # A CMake archive without ApplicationProperties can't be exported (see CMakeLists SKIP_INSTALL).
+          /usr/libexec/PlistBuddy -c 'Print :ApplicationProperties' "$RUNNER_TEMP/app.xcarchive/Info.plist"
+
+      - name: Export the ad-hoc .ipa
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>release-testing</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>thinning</key><string>&lt;none&gt;</string>
+            <key>compileBitcode</key><false/>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/app.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "${{ secrets.NOTARY_API_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.NOTARY_API_ISSUER_ID }}"
+          ipa=$(ls "$RUNNER_TEMP"/export/*.ipa | head -1)
+          name=$(basename "$ipa" .ipa)
+          mkdir -p dist
+          cp "$ipa" "dist/${name// /-}-${{ matrix.suffix }}-adhoc.ipa"
+          # Which devices the profile covers (the ones that can install this build).
+          unzip -o -q "$ipa" 'Payload/*/embedded.mobileprovision' -d "$RUNNER_TEMP/ipa"
+          security cms -D -i "$RUNNER_TEMP"/ipa/Payload/*/embedded.mobileprovision > "$RUNNER_TEMP/profile.plist"
+          echo "Provisioned devices:"; /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$RUNNER_TEMP/profile.plist" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.suffix }}-ipa
+          path: dist/*.ipa
+
+      - name: Upload to Firebase App Distribution
+        if: matrix.platform == 'iOS' && vars.FIREBASE_IOS_APP_ID != ''
+        env:
+          FIREBASE_IOS_APP_ID: ${{ vars.FIREBASE_IOS_APP_ID }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          # Not GROUPS: that's bash's own (read-only) group-ID array.
+          TESTER_GROUPS: ${{ inputs.firebase_groups != '' && inputs.firebase_groups || vars.FIREBASE_GROUPS }}
+        run: |
+          bundle exec fastlane ios distribute ipa:"$(ls "$PWD"/dist/*.ipa | head -1)" groups:"$TESTER_GROUPS" \
+            notes:"Build $BUILD_NUMBER: $(git log -1 --format='%h %s')"
+
+      - name: Remove the keychain and the API key
+        if: always()
+        run: |
+          [ -n "${KEYCHAIN:-}" ] && security delete-keychain "$KEYCHAIN" || true
+          rm -fP "$RUNNER_TEMP/AuthKey.p8"
+
+  release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [mac, mobile]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/* --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" --generate-notes

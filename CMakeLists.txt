@@ -24,6 +24,10 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
 endif()
 if(CB_IOS OR CB_VISIONOS)
     set(CB_APPLE_MOBILE TRUE)
+    # "xcodebuild archive" must produce an app archive that -exportArchive can
+    # turn into an .ipa: nothing but the app gets installed into it (the app
+    # target opts back in below). Without this the archive is "generic".
+    set(CMAKE_XCODE_ATTRIBUTE_SKIP_INSTALL YES)
 else()
     set(CB_APPLE_MOBILE FALSE)
 endif()
@@ -943,6 +947,8 @@ if(CB_APPLE_MOBILE)
     file(READ "${main_cpp_base}/globals.hpp" _cb_globals_hpp_ios)
     string(REGEX MATCH "CANNONBALL_DX_VERSION[ \t]+\"([^\"]+)\"" _cb_unused "${_cb_globals_hpp_ios}")
     set(CB_IOS_VERSION "${CMAKE_MATCH_1}")
+    # CFBundleVersion; CI passes its run number so every build is distinct.
+    set(CB_BUILD_NUMBER "${CB_IOS_VERSION}" CACHE STRING "Bundle version (build number)")
     set(CB_IOS_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum iOS version")
     set(CB_VISIONOS_DEPLOYMENT_TARGET "2.0" CACHE STRING "Minimum visionOS version")
 
@@ -1040,12 +1046,15 @@ if(CB_APPLE_MOBILE)
         MACOSX_BUNDLE_INFO_PLIST "${_cb_info_plist}"
         MACOSX_BUNDLE_BUNDLE_NAME "${APPLE_APP_NAME}"
         MACOSX_BUNDLE_GUI_IDENTIFIER "${APPLE_BUNDLE_ID}"
-        MACOSX_BUNDLE_BUNDLE_VERSION "${CB_IOS_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${CB_BUILD_NUMBER}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${CB_IOS_VERSION}"
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${APPLE_BUNDLE_ID}"
         XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
         XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
-        XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${APPLE_DEVELOPMENT_TEAM}")
+        XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${APPLE_DEVELOPMENT_TEAM}"
+        # The app is what an archive installs (see SKIP_INSTALL above).
+        XCODE_ATTRIBUTE_SKIP_INSTALL NO
+        XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)")
 endif()
 
 # Copy out config files

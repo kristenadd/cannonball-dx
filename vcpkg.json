@@ -6,5 +6,13 @@
     "tinyxml2",
     "mpg123",
     "angle"
+  ],
+  "overrides": [
+    {
+      "$comment": "Port-version 1 bootstraps pip 26.2.2; the baseline's pip 24.2 fails under the Python 3.15 that current vcpkg tools use (typing.no_type_check_decorator was removed), which breaks the angle build.",
+      "name": "vcpkg-get-python-packages",
+      "version": "2025-04-05",
+      "port-version": 1
+    }
   ]
 }

@@ -1,7 +1,7 @@
 # Lanes used by .github/workflows/apple-builds.yml (not needed for local builds).
 #
 # Environment: FIREBASE_PROJECT_NUMBER, FIREBASE_IOS_APP_ID, FIREBASE_SERVICE_ACCOUNT_JSON,
-# NOTARY_API_KEY_ID, NOTARY_API_ISSUER_ID, NOTARY_API_KEY_P8 (the .p8 text).
+# NOTARY_API_KEY_ID, NOTARY_API_ISSUER_ID, NOTARY_API_KEY_P8 (the .p8 text), BUNDLE_ID, APPLE_TEAM_ID.
 
 default_platform(:ios)
 
@@ -29,6 +29,28 @@ platform :ios do
       UI.message(File.read(file))
       register_devices(devices_file: file, api_key: asc_key)
     end
+  end
+
+  # A fresh ad-hoc distribution profile for the app, covering every device registered with
+  # Apple (Xcode's automatic export signing can't make one with only an API key: it asks for
+  # cloud signing, which the key may not use). visionOS apps use the iOS profile types.
+  # Prints the profile's name to $GITHUB_ENV as ADHOC_PROFILE_NAME.
+  lane :adhoc_profile do
+    dir = File.expand_path("~/Library/Developer/Xcode/UserData/Provisioning Profiles")
+    FileUtils.mkdir_p(dir)
+    get_provisioning_profile(
+      api_key: asc_key,
+      app_identifier: ENV.fetch("BUNDLE_ID"),
+      team_id: ENV.fetch("APPLE_TEAM_ID"),
+      adhoc: true,
+      force: true, # picks up devices registered since the last build
+      platform: "ios",
+      output_path: dir,
+      filename: "adhoc.mobileprovision"
+    )
+    name = lane_context[SharedValues::SIGH_NAME]
+    UI.message("Ad-hoc profile: #{name}")
+    File.write(ENV["GITHUB_ENV"], "ADHOC_PROFILE_NAME=#{name}\n", mode: "a") if ENV["GITHUB_ENV"]
   end
 
   # Upload an .ipa to Firebase App Distribution and invite the given groups (comma-separated,

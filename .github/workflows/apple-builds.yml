@@ -268,7 +268,6 @@ jobs:
           chmod 600 "$RUNNER_TEMP/AuthKey.p8"
 
       - name: Set up fastlane
-        if: matrix.platform == 'iOS' && vars.FIREBASE_PROJECT_NUMBER != ''
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
@@ -283,6 +282,14 @@ jobs:
           NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
           NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
         run: bundle exec fastlane ios sync_devices
+
+      - name: Fetch the ad-hoc provisioning profile
+        env:
+          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+          NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+        run: bundle exec fastlane ios adhoc_profile
 
       - name: Configure
         run: |
@@ -303,6 +310,8 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :ApplicationProperties' "$RUNNER_TEMP/app.xcarchive/Info.plist"
 
       - name: Export the ad-hoc .ipa
+        env:
+          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
         run: |
           cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -310,7 +319,11 @@ jobs:
           <plist version="1.0"><dict>
             <key>method</key><string>release-testing</string>
             <key>teamID</key><string>${APPLE_TEAM_ID}</string>
-            <key>signingStyle</key><string>automatic</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict>
+              <key>${BUNDLE_ID}</key><string>${ADHOC_PROFILE_NAME}</string>
+            </dict>
             <key>thinning</key><string>&lt;none&gt;</string>
             <key>compileBitcode</key><false/>
           </dict></plist>

@@ -988,6 +988,20 @@ if(CB_APPLE_MOBILE)
     execute_process(
         COMMAND sips -s format png -z 1024 1024 "${APPLE_APP_ICON}" --out "${_cb_icon_png}"
         OUTPUT_QUIET RESULT_VARIABLE _cb_sips_rc)
+    if(_cb_sips_rc EQUAL 0 AND CB_VISIONOS)
+        # The back layer of a visionOS icon must be fully opaque (the default icon is a
+        # circle with transparent corners). A round trip through JPEG drops the alpha;
+        # the corners turn white, outside the circle visionOS crops the icon to.
+        set(_cb_icon_jpg "${CMAKE_CURRENT_BINARY_DIR}/apple/AppIcon-opaque.jpg")
+        execute_process(
+            COMMAND sips -s format jpeg -s formatOptions best "${_cb_icon_png}" --out "${_cb_icon_jpg}"
+            OUTPUT_QUIET RESULT_VARIABLE _cb_sips_rc)
+        if(_cb_sips_rc EQUAL 0)
+            execute_process(
+                COMMAND sips -s format png "${_cb_icon_jpg}" --out "${_cb_icon_png}"
+                OUTPUT_QUIET RESULT_VARIABLE _cb_sips_rc)
+        endif()
+    endif()
     if(NOT _cb_sips_rc EQUAL 0)
         message(FATAL_ERROR "Could not convert ${APPLE_APP_ICON} to a 1024x1024 PNG")
     endif()

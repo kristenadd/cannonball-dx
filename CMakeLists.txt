@@ -883,11 +883,16 @@ endif()
 # ~/Library/Application Support/CannonBall DX (config, saves, roms/), with res/
 # linked back into the bundle. See macos_prepare_working_directory() in main.cpp.
 # The data folder name is fixed so renaming the app keeps existing ROMs/config.
+# Apple bundle version; CI's release workflow passes e.g. 1.04.7 (default: globals.hpp).
+set(CB_VERSION "" CACHE STRING "App version for Apple bundles (default: CANNONBALL_DX_VERSION)")
 option(MACOS_APP_BUNDLE "Build a macOS .app bundle" ON)
 if(APPLE AND NOT CB_APPLE_MOBILE AND MACOS_APP_BUNDLE)
     file(READ "${main_cpp_base}/globals.hpp" _cb_globals_hpp_mac)
     string(REGEX MATCH "CANNONBALL_DX_VERSION[ \t]+\"([^\"]+)\"" _cb_unused "${_cb_globals_hpp_mac}")
     set(CB_MAC_VERSION "${CMAKE_MATCH_1}")
+    if(CB_VERSION)
+        set(CB_MAC_VERSION "${CB_VERSION}")
+    endif()
 
     set_target_properties(cannonball-dx PROPERTIES
         MACOSX_BUNDLE TRUE
@@ -947,6 +952,9 @@ if(CB_APPLE_MOBILE)
     file(READ "${main_cpp_base}/globals.hpp" _cb_globals_hpp_ios)
     string(REGEX MATCH "CANNONBALL_DX_VERSION[ \t]+\"([^\"]+)\"" _cb_unused "${_cb_globals_hpp_ios}")
     set(CB_IOS_VERSION "${CMAKE_MATCH_1}")
+    if(CB_VERSION)
+        set(CB_IOS_VERSION "${CB_VERSION}")
+    endif()
     # CFBundleVersion; CI passes its run number so every build is distinct.
     set(CB_BUILD_NUMBER "${CB_IOS_VERSION}" CACHE STRING "Bundle version (build number)")
     set(CB_IOS_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum iOS version")

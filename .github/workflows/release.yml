@@ -1,0 +1,93 @@
+# Every push to master becomes a release: the next version number, the Apple, Windows and
+# Linux builds, and, when all of them pass, a vX.Y.N tag on the pushed commit with a GitHub
+# release that holds every platform's package.
+#
+# The version is CANNONBALL_DX_VERSION in src/main/globals.hpp plus a release number:
+# 1.04 gives v1.04.1, v1.04.2, ... Raising CANNONBALL_DX_VERSION starts again at .1.
+# A run that fails or is cancelled (a newer push cancels it) tags nothing, so numbers have no gaps.
+
+name: Release
+
+on:
+  push:
+    branches: [master]
+    paths-ignore: ['**.md', 'docs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    name: Next version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: next
+        run: |
+          base=$(sed -nE 's/^#define CANNONBALL_DX_VERSION[[:space:]]+"([^"]+)".*/\1/p' src/main/globals.hpp)
+          [ -n "$base" ] || { echo "::error::CANNONBALL_DX_VERSION isn't defined in src/main/globals.hpp"; exit 1; }
+          # The highest vBASE.N tag so far (lines ending in ^{} are annotated tags' targets).
+          last=$(git ls-remote --tags origin "refs/tags/v$base.*" \
+            | sed -nE "s#^.*refs/tags/v${base//./\\.}\\.([0-9]+)\$#\\1#p" | sort -n | tail -1)
+          version="$base.$(( ${last:-0} + 1 ))"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "::notice::Version $version"
+
+  apple:
+    name: Apple
+    needs: version
+    uses: ./.github/workflows/apple-builds.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+    secrets: inherit
+
+  windows:
+    name: Windows
+    uses: ./.github/workflows/windows-build.yml
+
+  linux:
+    name: Linux
+    uses: ./.github/workflows/linux-build.yml
+
+  release:
+    name: GitHub release
+    needs: [version, apple, windows, linux]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          name="cannonball-dx-$VERSION"
+          mv artifacts/mac-app/*-mac.zip "dist/$name-mac.zip"
+          mv artifacts/ios-ipa/*.ipa "dist/$name-ios-adhoc.ipa"
+          mv artifacts/visionos-ipa/*.ipa "dist/$name-visionos-adhoc.ipa"
+          # The Windows and Linux artifacts are the package folders; artifacts drop file modes.
+          mkdir pkg
+          mv artifacts/cannonball-dx-windows-* pkg/cannonball-dx
+          (cd pkg && zip -qr "../dist/$name-windows-x64.zip" cannonball-dx && rm -rf cannonball-dx)
+          mv artifacts/cannonball-dx-linux-* pkg/cannonball-dx
+          chmod +x pkg/cannonball-dx/cannonball-dx
+          tar -C pkg -czf "dist/$name-linux-x64.tar.gz" cannonball-dx
+          ls -l dist
+
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "CannonBall DX $VERSION" --generate-notes

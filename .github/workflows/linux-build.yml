@@ -1,9 +1,8 @@
 name: Linux Build
 
+# Pushes to master build through the Release workflow (release.yml), which calls this one.
 on:
-  push:
-    branches:
-      - master
+  workflow_call:
   pull_request:
     branches:
       - master

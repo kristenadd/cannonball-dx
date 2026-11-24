@@ -1,9 +1,10 @@
 # Signed Apple builds: the Mac app (Developer ID, notarized, stapled), an ad-hoc iPhone/iPad
 # .ipa (uploaded to Firebase App Distribution) and an ad-hoc Apple Vision Pro .ipa.
 #
-# Runs on every push to master, by hand (Actions ▸ Apple builds ▸ Run workflow), and on a
-# pushed tag v*, which also attaches all three to a GitHub release. The builds contain no ROMs
-# and use the default CannonBall DX name and icon (local apple-overrides.cmake isn't used).
+# Runs from the Release workflow (release.yml) on every push to master, which passes the
+# version and attaches the results to that version's GitHub release, and by hand (Actions ▸
+# Apple builds ▸ Run workflow). The builds contain no ROMs and use the default CannonBall DX
+# name and icon (local apple-overrides.cmake isn't used).
 #
 # Secrets (Settings ▸ Secrets and variables ▸ Actions). The names are the same as in
 # outrun2-decomp, PairMagic and SimulatorManager; ~/Projects/SigningSecrets exports them from
@@ -37,12 +38,30 @@
 name: Apple builds
 
 on:
-  push:
-    branches: [master]
-    tags: ['v*']
-    paths-ignore: ['**.md', 'docs/**', '.github/workflows/linux-build.yml', '.github/workflows/windows-build.yml']
+  workflow_call:
+    inputs:
+      version:
+        description: App version (e.g. 1.04.7); empty = CANNONBALL_DX_VERSION in globals.hpp
+        type: string
+        default: ''
+      mac:
+        type: boolean
+        default: true
+      visionos:
+        type: boolean
+        default: true
+      sync_devices:
+        type: boolean
+        default: true
+      firebase_groups:
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
+      version:
+        description: App version (empty = CANNONBALL_DX_VERSION in globals.hpp)
+        type: string
+        default: ''
       mac:
         description: Build the Mac app
         type: boolean
@@ -61,21 +80,22 @@ on:
         default: ''
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: apple-builds-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: true
 
 env:
   APPLE_TEAM_ID: B4H429V95D
   NOTARY_PROFILE: CannonBallDX-Notary
   BUILD_NUMBER: ${{ github.run_number }}
+  APP_VERSION: ${{ inputs.version }}
 
 jobs:
   mac:
     name: Mac app (notarized)
-    if: github.event_name != 'workflow_dispatch' || inputs.mac
+    if: inputs.mac
     runs-on: macos-26
     timeout-minutes: 90
     steps:
@@ -99,7 +119,7 @@ jobs:
       - name: Build
         run: |
           cmake -S . -B build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release -DWITH_MARCH_NATIVE=OFF \
-            -DAPPLE_OVERRIDES_FILE="$APPLE_OVERRIDES_FILE"
+            -DAPPLE_OVERRIDES_FILE="$APPLE_OVERRIDES_FILE" -DCB_VERSION="$APP_VERSION"
           cmake --build build-macos
           app=$(ls -d build-macos/*.app | head -1)
           echo "APP=$app" >> "$GITHUB_ENV"
@@ -201,7 +221,7 @@ jobs:
         # iPhone/iPad always; Apple Vision Pro unless a manual run turned it off.
         include: ${{ fromJSON(format('[{0}{1}]',
           '{"platform":"iOS","title":"iPhone/iPad","suffix":"ios"}',
-          (github.event_name != 'workflow_dispatch' || inputs.visionos)
+          inputs.visionos
             && ',{"platform":"visionOS","title":"Apple Vision Pro","suffix":"visionos"}' || '')) }}
     runs-on: macos-26
     timeout-minutes: 90
@@ -274,7 +294,7 @@ jobs:
           bundler-cache: true
 
       - name: Register the Firebase testers' devices
-        if: matrix.platform == 'iOS' && vars.FIREBASE_PROJECT_NUMBER != '' && (github.event_name != 'workflow_dispatch' || inputs.sync_devices)
+        if: matrix.platform == 'iOS' && vars.FIREBASE_PROJECT_NUMBER != '' && inputs.sync_devices
         env:
           FIREBASE_PROJECT_NUMBER: ${{ vars.FIREBASE_PROJECT_NUMBER }}
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
@@ -294,7 +314,7 @@ jobs:
       - name: Configure
         run: |
           cmake -S . -B build-${{ matrix.suffix }} -G Xcode -DCMAKE_SYSTEM_NAME=${{ matrix.platform }} \
-            -DAPPLE_OVERRIDES_FILE="$APPLE_OVERRIDES_FILE" -DCB_BUILD_NUMBER="$BUILD_NUMBER"
+            -DAPPLE_OVERRIDES_FILE="$APPLE_OVERRIDES_FILE" -DCB_BUILD_NUMBER="$BUILD_NUMBER" -DCB_VERSION="$APP_VERSION"
 
       - name: Archive
         run: |
@@ -357,27 +377,10 @@ jobs:
           TESTER_GROUPS: ${{ inputs.firebase_groups != '' && inputs.firebase_groups || vars.FIREBASE_GROUPS }}
         run: |
           bundle exec fastlane ios distribute ipa:"$(ls "$PWD"/dist/*.ipa | head -1)" groups:"$TESTER_GROUPS" \
-            notes:"Build $BUILD_NUMBER: $(git log -1 --format='%h %s')"
+            notes:"${APP_VERSION:-Build $BUILD_NUMBER}: $(git log -1 --format='%h %s')"
 
       - name: Remove the keychain and the API key
         if: always()
         run: |
           [ -n "${KEYCHAIN:-}" ] && security delete-keychain "$KEYCHAIN" || true
           rm -fP "$RUNNER_TEMP/AuthKey.p8"
-
-  release:
-    name: GitHub release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [mac, mobile]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - name: Create the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "${{ github.ref_name }}" dist/* --repo "${{ github.repository }}" \
-            --title "${{ github.ref_name }}" --generate-notes

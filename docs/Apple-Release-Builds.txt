@@ -1,9 +1,10 @@
 Signed Apple builds (GitHub Actions)
 ====================================
 
-.github/workflows/apple-builds.yml builds, signs and distributes the Apple apps
-on every push to master, on a pushed v* tag, and by hand (Actions > Apple
-builds > Run workflow):
+.github/workflows/apple-builds.yml builds, signs and distributes the Apple apps.
+The Release workflow (.github/workflows/release.yml) runs it on every push to
+master, together with the Windows and Linux builds; it also runs by hand
+(Actions > Apple builds > Run workflow):
 
 - Mac app: Developer ID signed with the hardened runtime, notarized and
   stapled; a .zip that opens on any Apple silicon Mac without warnings. The
@@ -14,9 +15,19 @@ builds > Run workflow):
   install flow; install it with Apple Configurator or
   "xcrun devicectl device install app").
 
-Each run keeps all three as workflow artifacts; a v* tag also attaches them to
-a GitHub release. The ad-hoc builds install on the devices registered with the
+Each run keeps all three as workflow artifacts. The ad-hoc builds install on the devices registered with the
 Apple developer team when they were built. The builds contain no ROMs.
+
+Versions and releases
+---------------------
+Every push to master gets the next version: CANNONBALL_DX_VERSION in
+src/main/globals.hpp plus a release number (1.04 gives 1.04.1, 1.04.2, ...;
+raising CANNONBALL_DX_VERSION starts again at .1). The Apple apps carry that
+version (CFBundleShortVersionString; CFBundleVersion is the run number). When
+the Apple, Windows and Linux builds all pass, the Release workflow tags the
+commit vX.Y.N and publishes a GitHub release with the Mac .zip, both .ipa
+files, the Windows .zip and the Linux .tar.gz. A failed or cancelled run (a
+newer push cancels the one in progress) tags nothing.
 
 Secrets and variables
 ---------------------

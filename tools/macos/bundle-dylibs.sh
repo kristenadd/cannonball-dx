@@ -59,8 +59,9 @@ resolve() {
 }
 
 # Breadth-first walk: queue holds Mach-O files whose deps still need fixing.
-queue=("$exe")
 seen=" "
+walk() {
+queue=("$@")
 while [ ${#queue[@]} -gt 0 ]; do
     file="${queue[0]}"
     queue=("${queue[@]:1}")
@@ -100,6 +101,25 @@ while [ ${#queue[@]} -gt 0 ]; do
         fi
     done < <(deps_of "$file")
 done
+}
+walk "$exe"
+
+# Homebrew's sdl2 is sdl2-compat, which loads SDL3 at runtime (dlopen, so no load command
+# names it) and aborts at launch without it. It looks next to itself first, so bundle SDL3
+# as Frameworks/libSDL3.dylib.
+if [ -f "$frameworks/libSDL2-2.0.0.dylib" ] && grep -q "sdl2-compat" < <(strings "$frameworks/libSDL2-2.0.0.dylib"); then
+    sdl3=""
+    for dir in "$(pkg-config --variable=libdir sdl3 2>/dev/null || true)" \
+               "$(brew --prefix sdl3 2>/dev/null || true)/lib" /opt/homebrew/lib /usr/local/lib; do
+        [ -n "$dir" ] && [ -f "$dir/libSDL3.0.dylib" ] && { sdl3="$dir/libSDL3.0.dylib"; break; }
+    done
+    [ -n "$sdl3" ] || { echo "bundle-dylibs: SDL2 is sdl2-compat but SDL3 wasn't found (brew install sdl3)" >&2; exit 1; }
+    cp -fL "$sdl3" "$frameworks/libSDL3.dylib"
+    chmod u+w "$frameworks/libSDL3.dylib"
+    install_name_tool -id "@rpath/libSDL3.dylib" "$frameworks/libSDL3.dylib" 2>/dev/null
+    seen="${seen}libSDL3.dylib "
+    walk "$frameworks/libSDL3.dylib"
+fi
 
 # Executable: drop build-machine rpaths, look only inside the bundle.
 for rp in $(rpaths_of "$exe"); do

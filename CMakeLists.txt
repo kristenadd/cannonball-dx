@@ -901,7 +901,9 @@ if(APPLE AND NOT CB_APPLE_MOBILE AND MACOS_APP_BUNDLE)
         MACOSX_BUNDLE_GUI_IDENTIFIER "${APPLE_BUNDLE_ID}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${CB_MAC_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${CB_MAC_VERSION}"
-        MACOSX_BUNDLE_ICON_FILE "AppIcon.icns")
+        MACOSX_BUNDLE_ICON_FILE "AppIcon.icns"
+        # CMake's default template plus the game category and Game Mode keys.
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/platform/macos/Info.plist.in")
 
     # App icon: every standard size, scaled from APPLE_APP_ICON (1024x1024 recommended).
     set(_cb_iconset "${CMAKE_CURRENT_BINARY_DIR}/AppIcon.iconset")

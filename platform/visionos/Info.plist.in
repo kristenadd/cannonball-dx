@@ -42,5 +42,13 @@
 			<string>ExtendedGamepad</string>
 		</dict>
 	</array>
+	<!-- A game: the racing-games category, and the Game Mode keys the iOS and Mac apps set.
+	     visionOS has no documented Game Mode; the keys are there in case it gains one. -->
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.racing-games</string>
+	<key>LSSupportsGameMode</key>
+	<true/>
+	<key>GCSupportsGameMode</key>
+	<true/>
 </dict>
 </plist>

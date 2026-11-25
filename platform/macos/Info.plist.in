@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>English</string>
+	<key>CFBundleExecutable</key>
+	<string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+	<key>CFBundleIconFile</key>
+	<string>${MACOSX_BUNDLE_ICON_FILE}</string>
+	<key>CFBundleIdentifier</key>
+	<string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+	<key>CSResourcesFileMapped</key>
+	<true/>
+	<!-- A game: the racing-games category plus Game Mode, which on macOS 14+ gives the game
+	     CPU/GPU priority and lowers Bluetooth controller and audio latency while it runs full
+	     screen (not in a window). LSSupportsGameMode is the current key; GCSupportsGameMode
+	     covers macOS 14. -->
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.racing-games</string>
+	<key>LSSupportsGameMode</key>
+	<true/>
+	<key>GCSupportsGameMode</key>
+	<true/>
+</dict>
+</plist>

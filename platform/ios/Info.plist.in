@@ -82,5 +82,15 @@
 			<string>ExtendedGamepad</string>
 		</dict>
 	</array>
+	<!-- A game: the racing-games category plus Game Mode, which on iOS/iPadOS 18+ and macOS 14+
+	     gives the game CPU/GPU priority and lowers Bluetooth controller and audio latency while it
+	     runs full screen. LSSupportsGameMode is the current key; GCSupportsGameMode covers
+	     iOS 18 and macOS 14. -->
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.racing-games</string>
+	<key>LSSupportsGameMode</key>
+	<true/>
+	<key>GCSupportsGameMode</key>
+	<true/>
 </dict>
 </plist>

@@ -29,6 +29,25 @@ commit vX.Y.N and publishes a GitHub release with the Mac .zip, both .ipa
 files, the Windows .zip and the Linux .tar.gz. A failed or cancelled run (a
 newer push cancels the one in progress) tags nothing.
 
+TestFlight and the App Store
+
+The App Store workflow (.github/workflows/app-store.yml) archives the
+iPhone/iPad and Apple Vision Pro apps again, this time with the custom icon
+from the private kristenadd/cannonball-dx-ci-assets repo (app-store.cmake
+there; replace AppIcon.png to change it), signs them for App Store Connect
+and uploads them. The Release workflow runs it on every push to master and
+uploads to TestFlight with the same version; the GitHub release doesn't wait
+for it. Set the repository variable APP_STORE_ON_PUSH to none to stop that,
+and TESTFLIGHT_GROUPS to give each build to TestFlight groups beyond the
+internal testers. Run it by hand (Actions > App Store > Run workflow) with
+"review" to upload and submit that version for App Review; release it by hand
+in App Store Connect once approved.
+
+Once, in App Store Connect: Apps > + > New App with the bundle ID
+com.cannonball-dx.CannonBallDX (iOS), then Add Platform > visionOS on the
+app's page. Until then, pushes only warn that there is no app record. Fill in
+the listing, screenshots and privacy answers there before the first review.
+
 Secrets and variables
 ---------------------
 The workflow's header lists every secret and variable it reads. They follow
@@ -53,4 +72,7 @@ Branding
 --------
 Release builds use the default CannonBall DX name and icon. A local
 apple-overrides.cmake (git-ignored) only affects local builds; CI sets just
-the signing team and the bundle ID (.github/scripts/apple-overrides.sh).
+the signing team and the bundle ID (.github/scripts/apple-overrides.sh). Only
+the App Store / TestFlight builds use the custom icon, from the private
+cannonball-dx-ci-assets repo, which CI checks out with a read-only deploy key
+(secret ASSETS_DEPLOY_KEY, set by SigningSecrets).

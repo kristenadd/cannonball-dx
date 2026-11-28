@@ -1,6 +1,7 @@
 # Every push to master becomes a release: the next version number, the Apple, Windows and
 # Linux builds, and, when all of them pass, a vX.Y.N tag on the pushed commit with a GitHub
-# release that holds every platform's package.
+# release that holds every platform's package. The same version also goes to TestFlight
+# (app-store.yml).
 #
 # The version is CANNONBALL_DX_VERSION in src/main/globals.hpp plus a release number:
 # 1.04 gives v1.04.1, v1.04.2, ... Raising CANNONBALL_DX_VERSION starts again at .1.
@@ -47,6 +48,18 @@ jobs:
     uses: ./.github/workflows/apple-builds.yml
     with:
       version: ${{ needs.version.outputs.version }}
+    secrets: inherit
+
+  # TestFlight (with the App Store icon). Not something the GitHub release waits for: a
+  # TestFlight problem doesn't hold back the release. APP_STORE_ON_PUSH=none turns it off.
+  app-store:
+    name: App Store
+    needs: version
+    if: vars.APP_STORE_ON_PUSH != 'none'
+    uses: ./.github/workflows/app-store.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      mode: testflight-soft
     secrets: inherit
 
   windows:

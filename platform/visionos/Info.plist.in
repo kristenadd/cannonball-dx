@@ -50,5 +50,9 @@
 	<true/>
 	<key>GCSupportsGameMode</key>
 	<true/>
+	<!-- Uses no encryption beyond Apple's own (HTTPS etc.): no export compliance questions on
+	     each App Store Connect upload. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

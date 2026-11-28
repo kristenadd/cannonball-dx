@@ -1,0 +1,227 @@
+# App Store / TestFlight builds of the iPhone/iPad and Apple Vision Pro apps: archived with the
+# custom icon from the private kristenadd/cannonball-dx-ci-assets repo (only these builds use it;
+# GitHub releases, the ad-hoc .ipa files and Firebase keep the default CannonBall DX icon),
+# signed for App Store Connect and uploaded to TestFlight, or also submitted for App Review.
+#
+# Runs from the Release workflow (release.yml) on every push to master, which uploads to
+# TestFlight unless the APP_STORE_ON_PUSH variable is "none" (a missing App Store Connect app
+# record then only warns), and by hand (Actions ▸ App Store ▸ Run workflow), where "review"
+# uploads and submits that version for App Review (released by hand once approved). A failure
+# here doesn't hold back the GitHub release.
+#
+# Secrets (~/Projects/SigningSecrets sets them; repos.conf line kristenadd/cannonball-dx):
+#   APPLE_DEVELOPMENT_P12_BASE64 / _PASSWORD    the archive
+#   APPLE_DISTRIBUTION_P12_BASE64 / _PASSWORD   the App Store export
+#   NOTARY_API_KEY_P8 / _ID / NOTARY_API_ISSUER_ID
+#                                     App Store Connect API key (App Manager role or higher):
+#                                     makes the App Store profile, uploads, submits
+#   ASSETS_DEPLOY_KEY                 read-only deploy key of kristenadd/cannonball-dx-ci-assets
+# Variables:
+#   IOS_BUNDLE_ID                     the app's bundle id, iOS and visionOS
+#   APP_STORE_ON_PUSH                 optional: "none" turns the push uploads off
+#   TESTFLIGHT_GROUPS                 optional: TestFlight groups (comma-separated) that also get
+#                                     each push's build; internal testers get every build anyway
+#   XCODE_VERSION                     optional, e.g. 26.2 (default: the newest Xcode on the runner)
+#
+# Once, by hand, in App Store Connect: Apps ▸ + ▸ New App with the bundle id (iOS), then on the
+# app's page Add Platform ▸ visionOS. The API key can't create app records.
+
+name: App Store
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        default: ''
+      mode:
+        description: none, testflight, testflight-soft (a missing app record only warns) or review
+        type: string
+        default: testflight-soft
+      visionos:
+        type: boolean
+        default: true
+      testflight_groups:
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      version:
+        description: App version (empty = CANNONBALL_DX_VERSION in globals.hpp)
+        type: string
+        default: ''
+      mode:
+        description: Upload to TestFlight, or upload and submit for App Review
+        type: choice
+        options: [testflight, review]
+        default: testflight
+      visionos:
+        description: Include the Apple Vision Pro app
+        type: boolean
+        default: true
+      testflight_groups:
+        description: TestFlight groups to give the build to (comma-separated; empty = the TESTFLIGHT_GROUPS variable)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  APPLE_TEAM_ID: B4H429V95D
+  # Unique per upload: App Store Connect refuses a build number it has seen for the version.
+  BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
+  APP_VERSION: ${{ inputs.version }}
+
+jobs:
+  app-store:
+    name: ${{ matrix.title }} App Store
+    if: inputs.mode != 'none'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(format('[{0}{1}]',
+          '{"platform":"iOS","title":"iPhone/iPad","suffix":"ios","asc":"ios"}',
+          inputs.visionos
+            && ',{"platform":"visionOS","title":"Apple Vision Pro","suffix":"visionos","asc":"xros"}' || '')) }}
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check secrets
+        env:
+          KEY: ${{ secrets.NOTARY_API_KEY_P8 }}
+          DEV: ${{ secrets.APPLE_DEVELOPMENT_P12_BASE64 }}
+          DIST: ${{ secrets.APPLE_DISTRIBUTION_P12_BASE64 }}
+          ASSETS: ${{ secrets.ASSETS_DEPLOY_KEY }}
+          BUNDLE: ${{ vars.IOS_BUNDLE_ID }}
+        run: |
+          for v in KEY:NOTARY_API_KEY_P8 DEV:APPLE_DEVELOPMENT_P12_BASE64 DIST:APPLE_DISTRIBUTION_P12_BASE64 \
+                   ASSETS:ASSETS_DEPLOY_KEY BUNDLE:IOS_BUNDLE_ID; do
+            eval "[ -n \"\$${v%%:*}\" ]" || { echo "::error::${v#*:} isn't set (see the comment at the top of this workflow)"; exit 1; }
+          done
+
+      - name: Check out the App Store assets
+        uses: actions/checkout@v4
+        with:
+          repository: kristenadd/cannonball-dx-ci-assets
+          ssh-key: ${{ secrets.ASSETS_DEPLOY_KEY }}
+          path: .ci-assets
+          persist-credentials: false
+
+      - name: Select Xcode
+        run: |
+          if [ -n "${{ vars.XCODE_VERSION }}" ]; then xcode="/Applications/Xcode_${{ vars.XCODE_VERSION }}.app"
+          else xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1); fi
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+          if [ "${{ matrix.platform }}" = visionOS ] && ! xcodebuild -showsdks | grep -q xros; then
+            xcodebuild -downloadPlatform visionOS
+          fi
+
+      - name: Signing team, bundle ID and App Store icon
+        env:
+          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+          ASSETS_DIR: ${{ github.workspace }}/.ci-assets
+        run: bash .github/scripts/apple-overrides.sh
+
+      - name: Install the signing certificates and the API key
+        env:
+          DEV_P12: ${{ secrets.APPLE_DEVELOPMENT_P12_BASE64 }}
+          DEV_PASSWORD: ${{ secrets.APPLE_DEVELOPMENT_P12_PASSWORD }}
+          DIST_P12: ${{ secrets.APPLE_DISTRIBUTION_P12_BASE64 }}
+          DIST_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_P12_PASSWORD }}
+          API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+        run: bash .github/scripts/install-ios-signing.sh
+
+      - name: Set up fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - name: Fetch the App Store provisioning profile
+        env:
+          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+          NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+        run: bundle exec fastlane ios profile kind:appstore
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-${{ matrix.suffix }} -G Xcode -DCMAKE_SYSTEM_NAME=${{ matrix.platform }} \
+            -DAPPLE_OVERRIDES_FILE="$APPLE_OVERRIDES_FILE" -DCB_BUILD_NUMBER="$BUILD_NUMBER" -DCB_VERSION="$APP_VERSION"
+
+      - name: Archive
+        run: |
+          xcodebuild -project build-${{ matrix.suffix }}/cannonball-dx.xcodeproj -scheme cannonball-dx \
+            -configuration Release -destination "generic/platform=${{ matrix.platform }}" \
+            -archivePath "$RUNNER_TEMP/app.xcarchive" -derivedDataPath "$RUNNER_TEMP/dd" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "${{ secrets.NOTARY_API_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.NOTARY_API_ISSUER_ID }}" \
+            archive
+          /usr/libexec/PlistBuddy -c 'Print :ApplicationProperties' "$RUNNER_TEMP/app.xcarchive/Info.plist"
+
+      - name: Export the App Store .ipa
+        env:
+          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict>
+              <key>${BUNDLE_ID}</key><string>${APPSTORE_PROFILE_NAME}</string>
+            </dict>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/app.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "${{ secrets.NOTARY_API_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.NOTARY_API_ISSUER_ID }}"
+          ipa=$(ls "$RUNNER_TEMP"/export/*.ipa | head -1)
+          echo "IPA=$ipa" >> "$GITHUB_ENV"
+          unzip -o -q "$ipa" 'Payload/*/Info.plist' -d "$RUNNER_TEMP/ipa"
+          plutil -extract CFBundleShortVersionString raw "$RUNNER_TEMP"/ipa/Payload/*/Info.plist
+          plutil -extract CFBundleVersion raw "$RUNNER_TEMP"/ipa/Payload/*/Info.plist
+
+      - name: Upload to App Store Connect
+        env:
+          MODE: ${{ inputs.mode }}
+          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+          TESTER_GROUPS: ${{ inputs.testflight_groups != '' && inputs.testflight_groups || vars.TESTFLIGHT_GROUPS }}
+          NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+        run: |
+          version=$(plutil -extract CFBundleShortVersionString raw "$RUNNER_TEMP"/ipa/Payload/*/Info.plist)
+          case $MODE in
+            testflight|testflight-soft)
+              soft=false; [ "$MODE" = testflight-soft ] && soft=true
+              bundle exec fastlane ios testflight ipa:"$IPA" platform:${{ matrix.asc }} \
+                bundle_id:"$BUNDLE_ID" groups:"$TESTER_GROUPS" soft:$soft \
+                notes:"$version ($(git log -1 --format='%h %s'))" ;;
+            review)
+              bundle exec fastlane ios app_store_review ipa:"$IPA" platform:${{ matrix.asc }} \
+                bundle_id:"$BUNDLE_ID" version:"$version" ;;
+            *) echo "::error::Unknown mode $MODE"; exit 1 ;;
+          esac
+
+      - name: Remove the keychain, the API key and the assets
+        if: always()
+        run: |
+          [ -n "${KEYCHAIN:-}" ] && security delete-keychain "$KEYCHAIN" || true
+          rm -fP "$RUNNER_TEMP/AuthKey.p8"
+          rm -rf .ci-assets

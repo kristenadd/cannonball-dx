@@ -418,6 +418,16 @@ endif()
 
 # --- Dependencies: SDL2 (robust handling), TinyXML2, EGL/GLESv2 -------------------
 
+if(CB_IOS OR CB_VISIONOS)
+    set(CB_IOS_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum iOS version")
+    set(CB_VISIONOS_DEPLOYMENT_TARGET "2.0" CACHE STRING "Minimum visionOS version")
+    # The bundled SDL / tinyxml2 / miniz builds get the app's minimum OS too (otherwise they
+    # use the SDK's, and App Store Connect rejects an embedded framework that needs a newer OS
+    # than the app's MinimumOSVersion).
+    set(CMAKE_XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "${CB_IOS_DEPLOYMENT_TARGET}")
+    set(CMAKE_XCODE_ATTRIBUTE_XROS_DEPLOYMENT_TARGET "${CB_VISIONOS_DEPLOYMENT_TARGET}")
+endif()
+
 # SDL2: Prefer modern imported targets; fall back to MODULE or pkg-config.
 set(_SDL2_TARGETS "")
 set(_SDL2_INCLUDE_DIRS "")
@@ -457,10 +467,11 @@ elseif(CB_VISIONOS)
     set(SDL_TESTS OFF CACHE BOOL "" FORCE)
     set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+    set(CB_SDL3_VERSION 3.4.20)
     FetchContent_Declare(
         cannonball_sdl3
         GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-        GIT_TAG release-3.4.20
+        GIT_TAG release-${CB_SDL3_VERSION}
         GIT_SHALLOW TRUE
     )
     FetchContent_Declare(
@@ -477,6 +488,11 @@ elseif(CB_VISIONOS)
         GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(cannonball_sdl3 cannonball_tinyxml2)
+    # App Store Connect rejects an embedded framework whose Info.plist has no CFBundleVersion
+    # (error 90056); SDL's CMake doesn't set one.
+    set_target_properties(SDL3-shared PROPERTIES
+        MACOSX_FRAMEWORK_BUNDLE_VERSION "${CB_SDL3_VERSION}"
+        MACOSX_FRAMEWORK_SHORT_VERSION_STRING "${CB_SDL3_VERSION}")
     FetchContent_GetProperties(cannonball_sdl2compat)
     if(NOT cannonball_sdl2compat_POPULATED)
         FetchContent_Populate(cannonball_sdl2compat)
@@ -959,8 +975,6 @@ if(CB_APPLE_MOBILE)
     endif()
     # CFBundleVersion; CI passes its run number so every build is distinct.
     set(CB_BUILD_NUMBER "${CB_IOS_VERSION}" CACHE STRING "Bundle version (build number)")
-    set(CB_IOS_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum iOS version")
-    set(CB_VISIONOS_DEPLOYMENT_TARGET "2.0" CACHE STRING "Minimum visionOS version")
 
     # App icon from APPLE_APP_ICON (1024x1024 recommended).
     set(_cb_xcassets "${CMAKE_CURRENT_BINARY_DIR}/apple/Assets.xcassets")

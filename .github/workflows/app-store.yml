@@ -210,7 +210,7 @@ jobs:
           case $MODE in
             testflight|testflight-soft)
               soft=false; [ "$MODE" = testflight-soft ] && soft=true
-              bundle exec fastlane ios testflight ipa:"$IPA" platform:${{ matrix.asc }} \
+              bundle exec fastlane ios upload_testflight ipa:"$IPA" platform:${{ matrix.asc }} \
                 bundle_id:"$BUNDLE_ID" groups:"$TESTER_GROUPS" soft:$soft \
                 notes:"$version ($(git log -1 --format='%h %s'))" ;;
             review)

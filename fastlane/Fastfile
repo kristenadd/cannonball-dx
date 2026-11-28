@@ -86,7 +86,7 @@ platform :ios do
   # waits for the processing and also gives the build to those groups, with the notes as "What
   # to Test"; external groups need Beta App Review (the first build of each version) and its
   # contact info, set once in App Store Connect ▸ TestFlight ▸ Test Information.
-  lane :testflight do |options|
+  lane :upload_testflight do |options|
     next unless app_store_ready?(options)
     groups = options[:groups].to_s.split(",").map(&:strip).reject(&:empty?)
     upload_to_testflight(
